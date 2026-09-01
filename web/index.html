@@ -121,14 +121,19 @@
     box-shadow: 0 8px 30px rgba(0,0,0,.12); flex-wrap: nowrap; max-width: 96vw; z-index: 10;
     transition: transform .25s ease;
   }
-  /* 朗读中鼠标离开：滑到屏幕底缘只露一条小把手，不挡正文；悬停即弹出 */
-  #ttsBar.hidden { transform: translate(-50%, calc(100% - 12px)); cursor: pointer; }
+  /* 朗读中鼠标离开：整条滑出屏幕，底部中央只剩一条 iPhone Home Indicator 式的小横条 */
+  #ttsBar.hidden { transform: translate(-50%, calc(100% + 40px)); }
+  #ttsDock {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 7px;
+    width: 56px; height: 5px; border-radius: 3px; background: var(--sub);
+    opacity: .5; cursor: pointer; z-index: 10; display: none; transition: opacity .2s;
+  }
+  #ttsDock:hover { opacity: 1; }
   #ttsBar .ctl {
     width: 38px; height: 38px; border-radius: 50%; border: none; cursor: pointer;
     background: var(--accent); color: #fff; font-size: 16px; flex-shrink: 0;
   }
   #ttsBar .ctl.stop { background: var(--line); color: var(--text); }
-  #ttsPos { font-size: 12px; color: var(--sub); min-width: 64px; text-align: center; }
   #ttsBar label { font-size: 12px; color: var(--sub); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
   #ttsBar input[type=range] { width: 90px; accent-color: var(--accent); }
   #ttsBar select {
@@ -234,7 +239,6 @@
   <div id="ttsBar">
     <button class="ctl" id="playBtn" title="朗读 / 暂停 / 继续">▶</button>
     <button class="ctl stop" id="stopBtn" title="停止">■</button>
-    <span id="ttsPos"></span>
     <label>语速<input type="range" id="rateSlider" min="-5" max="8" value="1"><span id="rateVal">110%</span></label>
     <label>语音<select id="voiceSel"><option value="">默认</option></select></label>
   </div>
@@ -242,6 +246,7 @@
 
 <div id="toast"></div>
 <div id="dropMask">松开以加载文档</div>
+<div id="ttsDock" title="展开朗读控制条"></div>
 
 <script>
 const api = () => window.pywebview.api;
@@ -527,7 +532,6 @@ function startTTS(fromPara) {
   edge.waiting = false; edge.fetching = false; edge.segList = segs;
   const voice = $('voiceSel').value || 'edge:zh-CN-XiaoxiaoNeural';
   edge.mode = voice.startsWith('edge:') ? 'edge' : 'sapi';
-  updateTtsPos();
   api().tts_start(segs.map(s => ({ p: s.p, t: s.t })), voice, +$('rateSlider').value).then(() => {
     if (edge.mode === 'edge') { edge.waiting = true; refillEdge(); }
   });
@@ -550,42 +554,34 @@ function highlightSeg(seg) {
   }
 }
 
-/* 朗读条上的位置 / 合成进度 */
-function updateTtsPos() {
-  const total = edge.segList.length;
-  if (!total || (!state.ttsPlaying && !state.ttsPaused)) { $('ttsPos').textContent = ''; return; }
-  if (edge.mode === 'edge' && edge.fillIdx < total) {
-    $('ttsPos').textContent = '合成中 ' + Math.min(edge.fillIdx + 1, total) + '/' + total;
-  } else if (edge.mode === 'edge') {
-    $('ttsPos').textContent = Math.min(edge.playIdx + 1, total) + '/' + total;
-  }
-}
-
 function finishEdge() {
   state.ttsPlaying = false; state.ttsPaused = false;
   $('playBtn').textContent = '▶';
-  $('ttsPos').textContent = '';
   clearHighlight();
   showTtsBar();
   toast('朗读完毕 ✓');
 }
 
-/* 朗读条自动隐藏：朗读时鼠标离开 1.2 秒后滑到底缘，悬停/未朗读时常驻 */
+/* 朗读条自动隐藏：朗读时鼠标离开 1.2 秒后整条滑出，底部只剩小横条（ttsDock） */
 let ttsHideTimer = null;
 function showTtsBar() {
   clearTimeout(ttsHideTimer);
   $('ttsBar').classList.remove('hidden');
+  $('ttsDock').style.display = 'none';
 }
 function maybeHideTtsBar() {
   clearTimeout(ttsHideTimer);
   ttsHideTimer = setTimeout(() => {
     if (state.ttsPlaying && !state.ttsPaused && !$('ttsBar').matches(':hover')) {
       $('ttsBar').classList.add('hidden');
+      $('ttsDock').style.display = 'block';
     }
   }, 1200);
 }
 $('ttsBar').addEventListener('mouseenter', showTtsBar);
 $('ttsBar').addEventListener('mouseleave', maybeHideTtsBar);
+$('ttsDock').addEventListener('mouseenter', () => { showTtsBar(); maybeHideTtsBar(); });
+$('ttsDock').addEventListener('click', () => { showTtsBar(); maybeHideTtsBar(); });
 
 function tryPlayNext() {
   if (edge.audio) return;
@@ -597,7 +593,6 @@ function tryPlayNext() {
   }
   edge.waiting = false;
   highlightSeg(edge.segList[edge.playIdx]);
-  updateTtsPos();
   const a = new Audio(item.src);
   edge.audio = a;
   a.onended = () => {
@@ -631,7 +626,6 @@ async function refillEdge() {
   } finally {
     edge.fetching = false;
   }
-  updateTtsPos();
   if (edge.waiting && !edge.audio) {
     if (edge.audioQ[edge.playIdx]) tryPlayNext();
     else if (edge.genDone) finishEdge();
@@ -691,7 +685,6 @@ $('stopBtn').onclick = () => {
   state.ttsPlaying = false;
   state.ttsPaused = false;
   $('playBtn').textContent = '▶';
-  $('ttsPos').textContent = '';
   clearHighlight();
   showTtsBar();
 };
@@ -741,21 +734,17 @@ window.__ttsEvent = ev => {
   if (ev.type === 'segment') {
     state.curSeg = ev.index;
     highlightSeg(edge.segList[ev.index]);
-    if (edge.mode === 'sapi') $('ttsPos').textContent = (ev.index + 1) + '/' + edge.segList.length;
   } else if (ev.type === 'gen_done') {
     edge.genDone = true;
-    updateTtsPos();
     refillEdge();
   } else if (ev.type === 'state') {
     if (ev.state === 'speaking') {
       state.ttsPlaying = true; state.ttsPaused = false;
       $('playBtn').textContent = '⏸';
-      updateTtsPos();
       maybeHideTtsBar();   // 开始朗读后自动收起，不挡正文
     } else if (ev.state === 'finished' || ev.state === 'stopped') {
       state.ttsPlaying = false; state.ttsPaused = false;
       $('playBtn').textContent = '▶';
-      $('ttsPos').textContent = '';
       clearHighlight();
       showTtsBar();
       if (ev.state === 'finished') toast('朗读完毕 ✓');
@@ -765,7 +754,6 @@ window.__ttsEvent = ev => {
     if (state.ttsPlaying || state.ttsPaused) {
       state.ttsPlaying = false; state.ttsPaused = false;
       $('playBtn').textContent = '▶';
-      $('ttsPos').textContent = '';
       clearHighlight();
     }
     showTtsBar();
