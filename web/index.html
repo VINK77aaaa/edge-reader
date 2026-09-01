@@ -137,6 +137,12 @@
   #ctxMenu div { padding: 8px 12px; font-size: 13px; cursor: pointer; border-radius: 6px; color: var(--text); }
   #ctxMenu div:hover { background: var(--accent-weak); color: var(--accent); }
   ::selection { background: var(--hl); }
+  #selCopyBtn {
+    position: fixed; z-index: 55; display: none; padding: 5px 14px; font-size: 12px;
+    background: var(--accent); color: #fff; border-radius: 7px; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,.25); user-select: none;
+  }
+  #selCopyBtn:hover { filter: brightness(1.12); }
   #ttsBar .ctl {
     width: 38px; height: 38px; border-radius: 50%; border: none; cursor: pointer;
     background: var(--accent); color: #fff; font-size: 16px; flex-shrink: 0;
@@ -256,6 +262,7 @@
 <div id="dropMask">松开以加载文档</div>
 <div id="ttsDock" title="展开朗读控制条"></div>
 <div id="ctxMenu"></div>
+<div id="selCopyBtn">复制</div>
 
 <script>
 const api = () => window.pywebview.api;
@@ -458,7 +465,11 @@ function enterReader(article, startPara) {
         state.segs.push({ p: i, t: chunk, span: s });
       });
     }
-    p.onclick = () => startTTS(i);
+    p.onclick = () => {
+      const s = window.getSelection();
+      if (s && s.toString().trim()) return; // 刚划选了文字：交给复制浮窗 / Ctrl+C，不触发朗读
+      startTTS(i);
+    };
     box.appendChild(p);
   });
   showView('reader');
@@ -911,6 +922,39 @@ document.addEventListener('contextmenu', e => {
 });
 document.addEventListener('click', e => {
   if (ctx.style.display === 'block' && !ctx.contains(e.target)) ctx.style.display = 'none';
+});
+
+/* ================= 划选文字：浮出「复制」小按钮 ================= */
+const selBtn = $('selCopyBtn');
+let selHideTimer = null;
+document.addEventListener('mouseup', e => {
+  if (e.button !== 0) return;
+  setTimeout(() => {
+    const sel = window.getSelection();
+    const t = sel ? sel.toString() : '';
+    if (!t.trim() || !$('readerView').classList.contains('active')
+        || (e.target && e.target.closest && e.target.closest('#ctxMenu,#selCopyBtn'))) {
+      selBtn.style.display = 'none';
+      return;
+    }
+    try {
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      selBtn.style.left = Math.max(8, Math.min(window.innerWidth - 70, rect.left + rect.width / 2 - 25)) + 'px';
+      selBtn.style.top = (rect.top > 50 ? rect.top - 36 : rect.bottom + 8) + 'px';
+    } catch (err) { return; }
+    selBtn._text = t;
+    selBtn.style.display = 'block';
+  }, 10);
+});
+selBtn.addEventListener('mousedown', e => e.stopPropagation());
+selBtn.addEventListener('click', () => {
+  copyText(selBtn._text || '');
+  if (window.getSelection()) window.getSelection().removeAllRanges();
+  selBtn.style.display = 'none';
+});
+$('readerScroll').addEventListener('scroll', () => {
+  clearTimeout(selHideTimer);
+  selHideTimer = setTimeout(() => { selBtn.style.display = 'none'; }, 200);
 });
 
 /* ================= 初始化 ================= */
