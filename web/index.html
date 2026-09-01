@@ -124,7 +124,7 @@
   }
 </style>
 </head>
-<body data-theme="light">
+<body data-theme="dark">
 
 <!-- ============ 首页 ============ -->
 <div id="homeView" class="view active">
@@ -330,8 +330,8 @@ $('startBtn').onclick = async () => {
 function applyPrefs() {
   api().get_prefs().then(p => {
     p = p || {};
-    document.body.dataset.theme = p.theme || 'light';
-    $('themeSel').value = p.theme || 'light';
+    document.body.dataset.theme = p.theme || 'dark';
+    $('themeSel').value = p.theme || 'dark';
     document.documentElement.style.setProperty('--fs', (p.fontSize || 19) + 'px');
     document.documentElement.style.setProperty('--lh', p.lineHeight || 1.9);
     lhState = p.lineHeight || 1.9;
@@ -609,6 +609,8 @@ window.__ttsEvent = ev => {
 
 function pollTTS() {
   if (!window.pywebview || !api().tts_poll) return;
+  // 只有阅读页在朗读/加载时才轮询，避免高频桥接调用拖垮界面线程
+  if (!$('readerView').classList.contains('active')) return;
   api().tts_poll().then(events => {
     (events || []).forEach(window.__ttsEvent);
   }).catch(() => {});
