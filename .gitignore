@@ -8,3 +8,8 @@ __pycache__/
 # 运行时产生的本地数据（朗读缓存、测试输出）
 tts_cache/
 test_run.log
+
+# PyInstaller 构建产物
+build/
+dist/
+*.spec

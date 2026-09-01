@@ -19,6 +19,10 @@
 
 ## 🚀 快速开始
 
+**方式一（最简单）**：到 [Releases](https://github.com/VINK77aaaa/edge-reader/releases) 下载 `EdgeReader.exe`，双击即用，无需安装 Python。
+
+**方式二（源码运行）**：
+
 ```bat
 :: 1. 克隆本仓库
 git clone https://github.com/VINK77aaaa/edge-reader.git

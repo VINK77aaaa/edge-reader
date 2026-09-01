@@ -8,6 +8,7 @@ import base64
 import hashlib
 import json
 import os
+import sys
 import threading
 import time
 import uuid
@@ -350,6 +351,12 @@ class ReaderApi:
             pythoncom.CoUninitialize()
 
 
+def resource_path(rel):
+    """兼容 PyInstaller 打包后的资源路径（onefile 解压到 sys._MEIPASS）。"""
+    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, rel)
+
+
 def _acquire_single_instance():
     """用 Windows 互斥量保证同一时间只有一个实例运行。"""
     import ctypes
@@ -364,7 +371,7 @@ def main():
         return
     api = ReaderApi()
     window = webview.create_window(
-        'Edge 阅读器', 'web/index.html', js_api=api,
+        'Edge 阅读器', resource_path(os.path.join('web', 'index.html')), js_api=api,
         width=1040, height=780, min_size=(780, 560),
     )
     webview.start(debug=False)
