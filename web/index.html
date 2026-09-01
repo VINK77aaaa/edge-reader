@@ -246,6 +246,7 @@
       <option value="sepia">米黄</option>
       <option value="dark">深色</option>
     </select>
+    <button class="tool-btn" id="fsBtn" title="F11">全屏</button>
   </div>
   <div id="readerScroll">
     <article class="article">
@@ -735,6 +736,19 @@ $('voiceSel').onchange = () => {
   }
 };
 
+/* ================= 全屏 ================= */
+function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  } else {
+    document.documentElement.requestFullscreen().catch(() => toast('进入全屏失败'));
+  }
+}
+document.addEventListener('fullscreenchange', () => {
+  $('fsBtn').textContent = document.fullscreenElement ? '退出全屏' : '全屏';
+});
+$('fsBtn').onclick = toggleFullscreen;
+
 /* ================= 键盘快捷键 ================= */
 function jumpPara(delta) {
   const i = state.curSeg + delta;
@@ -746,9 +760,13 @@ function jumpPara(delta) {
 document.addEventListener('keydown', e => {
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+  if (e.key === 'F11') { e.preventDefault(); toggleFullscreen(); return; }
   if (!$('readerView').classList.contains('active')) return;
   if (e.code === 'Space') { e.preventDefault(); $('playBtn').click(); }
-  else if (e.key === 'Escape') { $('backBtn').click(); }
+  else if (e.key === 'Escape') {
+    if (document.fullscreenElement) return; // 浏览器会用 Esc 退出全屏，不触发返回
+    $('backBtn').click();
+  }
   else if (e.key === 'ArrowRight') { e.preventDefault(); jumpPara(1); }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); jumpPara(-1); }
 });
@@ -833,6 +851,7 @@ $('themeSel').onchange = () => {
   savePrefs({ theme: $('themeSel').value });
 };
 $('backBtn').onclick = () => {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   api().tts_stop();
   stopAudio();
   api().set_title('Edge 阅读器');
