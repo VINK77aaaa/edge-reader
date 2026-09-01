@@ -124,11 +124,11 @@
   /* 朗读中鼠标离开：整条滑出屏幕，底部中央只剩一条 iPhone Home Indicator 式的小横条 */
   #ttsBar.hidden { transform: translate(-50%, calc(100% + 40px)); }
   #ttsDock {
-    position: fixed; left: 50%; transform: translateX(-50%); bottom: 7px;
-    width: 56px; height: 5px; border-radius: 3px; background: var(--sub);
-    opacity: .5; cursor: pointer; z-index: 10; display: none; transition: opacity .2s;
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 10px;
+    width: 160px; height: 10px; border-radius: 5px; background: var(--sub);
+    opacity: .55; cursor: pointer; z-index: 10; display: none; transition: opacity .2s, width .15s;
   }
-  #ttsDock:hover { opacity: 1; }
+  #ttsDock:hover { opacity: 1; width: 190px; }
   #ttsBar .ctl {
     width: 38px; height: 38px; border-radius: 50%; border: none; cursor: pointer;
     background: var(--accent); color: #fff; font-size: 16px; flex-shrink: 0;
