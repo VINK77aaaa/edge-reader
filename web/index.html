@@ -736,17 +736,14 @@ $('voiceSel').onchange = () => {
   }
 };
 
-/* ================= 全屏 ================= */
+/* ================= 全屏（原生窗口级） ================= */
+let fullscreen = false;
 function toggleFullscreen() {
-  if (document.fullscreenElement) {
-    document.exitFullscreen().catch(() => {});
-  } else {
-    document.documentElement.requestFullscreen().catch(() => toast('进入全屏失败'));
-  }
+  api().toggle_fullscreen().then(isFs => {
+    fullscreen = !!isFs;
+    $('fsBtn').textContent = fullscreen ? '退出全屏' : '全屏';
+  }).catch(() => toast('全屏切换失败'));
 }
-document.addEventListener('fullscreenchange', () => {
-  $('fsBtn').textContent = document.fullscreenElement ? '退出全屏' : '全屏';
-});
 $('fsBtn').onclick = toggleFullscreen;
 
 /* ================= 键盘快捷键 ================= */
@@ -764,7 +761,7 @@ document.addEventListener('keydown', e => {
   if (!$('readerView').classList.contains('active')) return;
   if (e.code === 'Space') { e.preventDefault(); $('playBtn').click(); }
   else if (e.key === 'Escape') {
-    if (document.fullscreenElement) return; // 浏览器会用 Esc 退出全屏，不触发返回
+    if (fullscreen) { toggleFullscreen(); return; } // 全屏中 Esc 只退出全屏
     $('backBtn').click();
   }
   else if (e.key === 'ArrowRight') { e.preventDefault(); jumpPara(1); }
@@ -851,7 +848,7 @@ $('themeSel').onchange = () => {
   savePrefs({ theme: $('themeSel').value });
 };
 $('backBtn').onclick = () => {
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (fullscreen) toggleFullscreen(); // 退出全屏
   api().tts_stop();
   stopAudio();
   api().set_title('Edge 阅读器');

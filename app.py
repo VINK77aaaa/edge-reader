@@ -62,6 +62,7 @@ _edge_gen_done = False
 _edge_error = None
 _tts_session = 0      # 朗读会话编号：每次 tts_start 递增，旧线程发现过时立即退出
 _window = None  # webview 窗口引用（放模块级，避免被 pywebview 扫描 API 对象）
+_fs = False     # 当前是否处于全屏
 
 
 class ReaderApi:
@@ -276,6 +277,18 @@ class ReaderApi:
         except OSError:
             return {}
         return {'p': seg['p'] if seg else 0, 'b64': b64}
+
+    def toggle_fullscreen(self):
+        """原生窗口级全屏（WebView2 的网页全屏只填客户区，标题栏还在，故用窗口 API）。"""
+        global _window, _fs
+        try:
+            if _window:
+                _window.toggle_fullscreen()
+                _fs = not _fs
+                return _fs
+        except Exception:
+            pass
+        return _fs
 
     def set_title(self, title):
         """窗口标题跟随文章标题。"""
