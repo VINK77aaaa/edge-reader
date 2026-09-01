@@ -150,6 +150,7 @@ class ReaderApi:
 
     def tts_poll(self):
         """前端定时调用，取走朗读事件（替代后台线程推送）。"""
+        global _events
         with _ev_lock:
             events, _events = _events, []
         return events
@@ -199,6 +200,8 @@ class ReaderApi:
 
         voice_name 带 'edge:' 前缀走 Edge 在线神经网络语音（如晓晓、云健），
         否则走本机 SAPI 语音。"""
+        global _rate, _voice_name, _tts_thread
+        global _edge_segs, _edge_paths, _edge_gen_done, _edge_error
         if voice_name and voice_name.startswith('edge:'):
             try:
                 import edge_tts  # noqa: F401
@@ -252,6 +255,7 @@ class ReaderApi:
         _pause_evt.clear()
 
     def tts_set_rate(self, rate):
+        global _rate
         _rate = clamp_rate(rate)
 
     def _apply_voice(self, voice):
@@ -268,6 +272,7 @@ class ReaderApi:
 
     def _edge_gen_loop(self, segments, voice_id, rate):
         """Edge 在线语音模式：后台逐段合成 mp3（带缓存），前端轮询 tts_get_audio 取走播放。"""
+        global _edge_gen_done, _edge_error
         import asyncio
 
         import edge_tts
