@@ -496,6 +496,7 @@ def main():
         width=geom.get('w', 1040), height=geom.get('h', 780),
         x=geom.get('x'), y=geom.get('y'),
         min_size=(780, 560),
+        text_select=True,  # 允许选中正文复制（pywebview 默认全页禁选）
     )
     global _window
     _window = window
