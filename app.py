@@ -60,6 +60,7 @@ _edge_segs = []
 _edge_paths = []
 _edge_gen_done = False
 _edge_error = None
+_tts_session = 0      # 朗读会话编号：每次 tts_start 递增，旧线程发现过时立即退出
 _window = None  # webview 窗口引用（放模块级，避免被 pywebview 扫描 API 对象）
 
 
@@ -295,7 +296,7 @@ class ReaderApi:
 
         voice_name 带 'edge:' 前缀走 Edge 在线神经网络语音（如晓晓、云健），
         否则走本机 SAPI 语音。"""
-        global _rate, _voice_name, _tts_thread
+        global _rate, _voice_name, _tts_thread, _tts_session
         global _edge_segs, _edge_paths, _edge_gen_done, _edge_error
         if voice_name and voice_name.startswith('edge:'):
             try:
@@ -305,6 +306,8 @@ class ReaderApi:
                               'message': '使用在线语音需先安装 edge-tts: py -m pip install edge-tts'})
                 return False
             self.tts_stop()
+            _tts_session += 1
+            sess = _tts_session
             _stop_evt.clear()
             _pause_evt.clear()
             _rate = clamp_rate(rate)
@@ -318,7 +321,7 @@ class ReaderApi:
                 _edge_gen_done = False
                 _edge_error = None
             _tts_thread = threading.Thread(
-                target=self._edge_gen_loop, args=(segs, voice_name[5:], _rate), daemon=True)
+                target=self._edge_gen_loop, args=(segs, voice_name[5:], _rate, sess), daemon=True)
             _tts_thread.start()
             return True
 
@@ -327,6 +330,8 @@ class ReaderApi:
                           'message': '缺少 pywin32，无法朗读。请运行: py -m pip install pywin32'})
             return False
         self.tts_stop()
+        _tts_session += 1
+        sess = _tts_session
         _stop_evt.clear()
         _pause_evt.clear()
         _rate = clamp_rate(rate)
@@ -335,7 +340,7 @@ class ReaderApi:
                 for s in segments or [] if str(s.get('t', '')).strip()]
         if not segs:
             return False
-        _tts_thread = threading.Thread(target=self._speak_loop, args=(segs,), daemon=True)
+        _tts_thread = threading.Thread(target=self._speak_loop, args=(segs, sess), daemon=True)
         _tts_thread.start()
         return True
 
@@ -365,7 +370,7 @@ class ReaderApi:
         except Exception:
             pass
 
-    def _edge_gen_loop(self, segments, voice_id, rate):
+    def _edge_gen_loop(self, segments, voice_id, rate, sess):
         """Edge 在线语音模式：后台逐段合成 mp3（带缓存），前端轮询 tts_get_audio 取走播放。"""
         global _edge_gen_done, _edge_error
         import asyncio
@@ -380,22 +385,26 @@ class ReaderApi:
             com = edge_tts.Communicate(text, voice_id, rate=rate_str)
             await asyncio.wait_for(com.save(path), timeout=90)
 
-        self._notify({'type': 'state', 'state': 'speaking'})
+        if sess == _tts_session:
+            self._notify({'type': 'state', 'state': 'speaking'})
         try:
             for idx, seg in enumerate(segments):
-                if _stop_evt.is_set():
+                if _stop_evt.is_set() or sess != _tts_session:
                     break
                 key = hashlib.md5((voice_id + rate_str + seg['t']).encode('utf-8')).hexdigest()
                 path = os.path.join(TTS_CACHE_DIR, key + '.mp3')
                 if not os.path.exists(path):
                     asyncio.run(synth(seg['t'], path))
-                if _stop_evt.is_set():
+                if _stop_evt.is_set() or sess != _tts_session:
                     break
                 with _edge_lock:
-                    _edge_paths[idx] = path
-            if not _stop_evt.is_set():
+                    if sess == _tts_session:
+                        _edge_paths[idx] = path
+            if not _stop_evt.is_set() and sess == _tts_session:
                 self._notify({'type': 'gen_done'})
         except Exception as exc:
+            if sess != _tts_session:
+                return
             with _edge_lock:
                 _edge_gen_done = True
                 _edge_error = '在线语音合成失败（请检查网络）: %s' % exc
@@ -403,23 +412,25 @@ class ReaderApi:
                           'message': '在线语音合成失败（请检查网络）: %s' % exc})
         finally:
             with _edge_lock:
-                _edge_gen_done = True
+                if sess == _tts_session:
+                    _edge_gen_done = True
 
-    def _speak_loop(self, segments):
+    def _speak_loop(self, segments, sess):
         pythoncom.CoInitialize()
         try:
             voice = win32com.client.Dispatch('SAPI.SpVoice')
             self._apply_voice(voice)
             voice.Rate = _rate
-            self._notify({'type': 'state', 'state': 'speaking'})
+            if sess == _tts_session:
+                self._notify({'type': 'state', 'state': 'speaking'})
             for idx, seg in enumerate(segments):
-                if _stop_evt.is_set():
+                if _stop_evt.is_set() or sess != _tts_session:
                     break
                 voice.Speak(seg['t'], SPF_ASYNC)
                 self._notify({'type': 'segment', 'index': idx, 'p': seg['p']})
                 was_paused = False
                 while True:
-                    if _stop_evt.is_set():
+                    if _stop_evt.is_set() or sess != _tts_session:
                         voice.Speak('', SPF_ASYNC | SPF_PURGEBEFORESPEAK)
                         voice.Resume()
                         break
@@ -435,10 +446,8 @@ class ReaderApi:
                     if voice.Rate != _rate:
                         voice.Rate = _rate
                     time.sleep(0.05)
-            if not _stop_evt.is_set():
+            if not _stop_evt.is_set() and sess == _tts_session:
                 self._notify({'type': 'state', 'state': 'finished'})
-            else:
-                self._notify({'type': 'state', 'state': 'stopped'})
         except Exception as exc:
             self._notify({'type': 'error', 'message': '朗读出错: %s' % exc})
         finally:

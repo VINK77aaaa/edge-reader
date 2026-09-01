@@ -735,9 +735,9 @@ $('openDocBtn').onclick = async () => {
 };
 
 /* ================= 初始化 ================= */
-window.addEventListener('pywebviewready', () => {
+window.addEventListener('pywebviewready', async () => {
+  await loadVoices();   // 先建好语音选项，再恢复保存的偏好，避免选择被重置
   applyPrefs();
-  loadVoices();
   refreshHome();
   setInterval(pollTTS, 150);
 });
