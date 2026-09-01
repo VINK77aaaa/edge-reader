@@ -277,6 +277,15 @@ class ReaderApi:
             return {}
         return {'p': seg['p'] if seg else 0, 'b64': b64}
 
+    def set_title(self, title):
+        """窗口标题跟随文章标题。"""
+        global _window
+        try:
+            if _window:
+                _window.set_title((str(title) or 'Edge 阅读器')[:60])
+        except Exception:
+            pass
+
     def tts_voices(self):
         if not HAS_SAPI:
             return []
@@ -467,18 +476,41 @@ def _acquire_single_instance():
     return ctypes.windll.kernel32.GetLastError() != 183  # 183 = ERROR_ALREADY_EXISTS
 
 
+def _read_prefs():
+    try:
+        with open(DB_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f).get('prefs', {})
+    except (OSError, ValueError):
+        return {}
+
+
 def main():
     if not _acquire_single_instance():
         import ctypes
         ctypes.windll.user32.MessageBoxW(0, 'Edge 阅读器已经在运行了。', '提示', 0x40)
         return
     api = ReaderApi()
+    geom = _read_prefs().get('window') or {}
     window = webview.create_window(
         'Edge 阅读器', resource_path(os.path.join('web', 'index.html')), js_api=api,
-        width=1040, height=780, min_size=(780, 560),
+        width=geom.get('w', 1040), height=geom.get('h', 780),
+        x=geom.get('x'), y=geom.get('y'),
+        min_size=(780, 560),
     )
     global _window
     _window = window
+
+    def _save_geometry():
+        try:
+            db = api._load_db()
+            db.setdefault('prefs', {})['window'] = {
+                'x': window.x, 'y': window.y, 'w': window.width, 'h': window.height,
+            }
+            api._save_db(db)
+        except Exception:
+            pass
+
+    window.events.closing += _save_geometry
     webview.start(debug=False)
 
 

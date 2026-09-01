@@ -54,9 +54,10 @@
   .opt-row label { font-size: 13px; color: var(--sub); display: flex; align-items: center; gap: 6px; cursor: pointer; }
   .btn {
     border: none; border-radius: 10px; padding: 10px 22px; font-size: 14px; font-family: inherit;
-    cursor: pointer; background: var(--accent); color: #fff;
+    cursor: pointer; background: var(--accent); color: #fff; transition: transform .05s, filter .15s;
   }
   .btn:hover { filter: brightness(1.08); }
+  .btn:active { transform: scale(.96); }
   .btn.ghost { background: var(--accent-weak); color: var(--accent); }
   .btn.small { padding: 6px 14px; font-size: 13px; }
   .btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -76,6 +77,11 @@
   .empty { text-align: center; color: var(--sub); font-size: 13px; padding: 18px 0; }
 
   /* ---------- 阅读页 ---------- */
+  #readerView { position: relative; }
+  #readProgress {
+    position: absolute; top: 0; left: 0; height: 2px; width: 0;
+    background: var(--accent); z-index: 20; transition: width .1s linear;
+  }
   #readerToolbar {
     display: flex; align-items: center; gap: 10px; padding: 10px 16px;
     background: var(--card); border-bottom: 1px solid var(--line); flex-shrink: 0; flex-wrap: wrap;
@@ -83,23 +89,30 @@
   #readerToolbar .title { flex: 1; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tool-btn {
     border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 8px;
-    padding: 5px 10px; font-size: 13px; font-family: inherit; cursor: pointer;
+    padding: 5px 10px; font-size: 13px; font-family: inherit; cursor: pointer; transition: transform .05s;
   }
   .tool-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .tool-btn:active { transform: scale(.94); }
+  textarea#pasteBox::placeholder, input#titleBox::placeholder { color: var(--sub); opacity: .75; }
   select.tool-btn { padding: 5px 6px; }
   #readerScroll { flex: 1; overflow-y: auto; }
   .article {
     max-width: 720px; margin: 0 auto; padding: 40px 28px 140px;
   }
-  .article h1 { font-size: 26px; margin-bottom: 8px; line-height: 1.4; }
-  .article .meta { color: var(--sub); font-size: 13px; margin-bottom: 32px; }
+  .article h1 { font-size: 26px; margin-bottom: 8px; line-height: 1.4; text-align: center; }
+  .article h1::after {
+    content: ''; display: block; width: 56px; height: 3px;
+    background: var(--accent); margin: 14px auto 0; border-radius: 2px; opacity: .85;
+  }
+  .article .meta { color: var(--sub); font-size: 13px; margin-bottom: 32px; text-align: center; }
   .article p {
     font-size: var(--fs, 19px); line-height: var(--lh, 1.9);
     margin-bottom: calc(var(--fs, 19px) * 0.9); text-align: justify;
     font-family: var(--serif, "Microsoft YaHei"); transition: background .2s;
     border-radius: 6px; padding: 2px 6px; margin-left: -6px; margin-right: -6px;
   }
-  .article p.heading { font-size: calc(var(--fs, 19px) * 1.25); font-weight: 700; text-align: center; }
+  .article p:not(.heading) { text-indent: 2em; }
+  .article p.heading { font-size: calc(var(--fs, 19px) * 1.25); font-weight: 700; text-align: center; text-indent: 0; }
   .article .speaking { background: var(--hl); border-radius: 4px; box-shadow: 0 0 0 2px var(--hl); }
   #ttsBar {
     position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px;
@@ -112,6 +125,7 @@
     background: var(--accent); color: #fff; font-size: 17px;
   }
   #ttsBar .ctl.stop { background: var(--line); color: var(--text); }
+  #ttsPos { font-size: 12px; color: var(--sub); min-width: 70px; text-align: center; }
   #ttsBar label { font-size: 12px; color: var(--sub); display: flex; align-items: center; gap: 6px; }
   #ttsBar input[type=range] { width: 110px; accent-color: var(--accent); }
   #ttsBar select {
@@ -193,11 +207,13 @@
 
 <!-- ============ 阅读页 ============ -->
 <div id="readerView" class="view">
+  <div id="readProgress"></div>
   <div id="readerToolbar">
     <button class="tool-btn" id="backBtn">← 返回</button>
     <div class="title" id="readerTitle"></div>
     <button class="tool-btn" id="fontDownBtn">A－</button>
     <button class="tool-btn" id="fontUpBtn">A＋</button>
+    <button class="tool-btn" id="fontFamBtn">字体：雅黑</button>
     <button class="tool-btn" id="lhBtn">行距：标准</button>
     <select class="tool-btn" id="themeSel">
       <option value="light">浅色</option>
@@ -215,6 +231,7 @@
   <div id="ttsBar">
     <button class="ctl" id="playBtn" title="朗读 / 暂停 / 继续">▶</button>
     <button class="ctl stop" id="stopBtn" title="停止">■</button>
+    <span id="ttsPos"></span>
     <label>语速<input type="range" id="rateSlider" min="-5" max="8" value="1"><span id="rateVal">110%</span></label>
     <label>语音<select id="voiceSel"><option value="">默认</option></select></label>
   </div>
@@ -231,6 +248,7 @@ const state = {
   article: null,     // 当前阅读的文章（含 text）
   paras: [],         // 整理后的段落
   segs: [],          // 朗读块（与页面上的句子一一对应）
+  curSeg: -1,        // 当前朗读中的块下标（用于快捷键跳转）
   ttsPlaying: false,
   ttsPaused: false,
   saveTimer: null,
@@ -379,6 +397,8 @@ function applyPrefs() {
     updateLhBtn();
     if (p.rate !== undefined) $('rateSlider').value = p.rate;
     updateRateVal();
+    fontSerif = !!p.fontSerif;
+    applyFontFam();
     histOpen = !!p.histOpen;
     applyHistOpen();
     if (p.voice) {
@@ -395,9 +415,14 @@ function enterReader(article, startPara) {
   state.article = article;
   state.paras = organizeText(article.text);
   state.segs = [];
+  state.curSeg = -1;
   $('readerTitle').textContent = article.title;
   $('articleTitle').textContent = article.title;
-  $('articleMeta').textContent = article.created + ' · ' + state.paras.length + ' 段 · 朗读时当前句子会高亮，点击任意段落可从该处开始';
+  const chars = state.paras.join('').length;
+  const mins = Math.max(1, Math.round(chars / 320));
+  $('articleMeta').textContent = article.created + ' · ' + state.paras.length + ' 段 · 约 '
+    + chars + ' 字 · 朗读约 ' + mins + ' 分钟 · 点击任意句子可从该处开始朗读';
+  api().set_title(article.title + ' · Edge 阅读器');
   const box = $('contentBox');
   box.innerHTML = '';
   state.paras.forEach((t, i) => {
@@ -450,16 +475,18 @@ function showView(name) {
   $('readerView').classList.toggle('active', name === 'reader');
 }
 
-/* 进度保存（滚动时节流保存） */
+/* 阅读进度：顶部细线即时更新，保存节流 */
 $('readerScroll').addEventListener('scroll', () => {
   if (!state.article) return;
+  const sc = $('readerScroll');
+  const ratio = sc.scrollHeight <= sc.clientHeight ? 1 : sc.scrollTop / (sc.scrollHeight - sc.clientHeight);
+  const pct = Math.min(100, Math.max(0, Math.round(ratio * 100)));
+  $('readProgress').style.width = pct + '%';
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(() => {
-    const sc = $('readerScroll');
-    const ratio = sc.scrollHeight <= sc.clientHeight ? 1 : sc.scrollTop / (sc.scrollHeight - sc.clientHeight);
     const cur = document.querySelector('.speaking');
     const paraEl = cur && (cur.tagName === 'P' ? cur : cur.closest('p'));
-    api().save_progress(state.article.id, Math.min(1, Math.max(0, ratio)), paraEl ? +paraEl.dataset.p : 0);
+    api().save_progress(state.article.id, pct / 100, paraEl ? +paraEl.dataset.p : 0);
   }, 800);
 });
 
@@ -490,12 +517,14 @@ const edge = { audioQ: {}, playIdx: 0, fillIdx: 0, genDone: false, audio: null, 
 function startTTS(fromPara) {
   const segs = state.segs.filter(s => s.p >= fromPara);
   if (!segs.length) return;
+  segs.forEach((s, i) => { s.idx = i; });
   clearHighlight();
   stopAudio();
   edge.audioQ = {}; edge.playIdx = 0; edge.fillIdx = 0; edge.genDone = false;
   edge.waiting = false; edge.fetching = false; edge.segList = segs;
   const voice = $('voiceSel').value || 'edge:zh-CN-XiaoxiaoNeural';
   edge.mode = voice.startsWith('edge:') ? 'edge' : 'sapi';
+  updateTtsPos();
   api().tts_start(segs.map(s => ({ p: s.p, t: s.t })), voice, +$('rateSlider').value).then(() => {
     if (edge.mode === 'edge') { edge.waiting = true; refillEdge(); }
   });
@@ -510,6 +539,7 @@ function highlightSeg(seg) {
   clearHighlight();
   if (!seg || !seg.span) return;
   seg.span.classList.add('speaking');
+  if (seg.idx !== undefined) state.curSeg = seg.idx;
   const sc = $('readerScroll');
   const top = seg.span.getBoundingClientRect().top - sc.getBoundingClientRect().top;
   if (top < sc.clientHeight * 0.25 || top > sc.clientHeight * 0.7) {
@@ -517,9 +547,21 @@ function highlightSeg(seg) {
   }
 }
 
+/* 朗读条上的位置 / 合成进度 */
+function updateTtsPos() {
+  const total = edge.segList.length;
+  if (!total || (!state.ttsPlaying && !state.ttsPaused)) { $('ttsPos').textContent = ''; return; }
+  if (edge.mode === 'edge' && edge.fillIdx < total) {
+    $('ttsPos').textContent = '合成中 ' + Math.min(edge.fillIdx + 1, total) + '/' + total;
+  } else if (edge.mode === 'edge') {
+    $('ttsPos').textContent = Math.min(edge.playIdx + 1, total) + '/' + total;
+  }
+}
+
 function finishEdge() {
   state.ttsPlaying = false; state.ttsPaused = false;
   $('playBtn').textContent = '▶';
+  $('ttsPos').textContent = '';
   clearHighlight();
   toast('朗读完毕 ✓');
 }
@@ -534,6 +576,7 @@ function tryPlayNext() {
   }
   edge.waiting = false;
   highlightSeg(edge.segList[edge.playIdx]);
+  updateTtsPos();
   const a = new Audio(item.src);
   edge.audio = a;
   a.onended = () => {
@@ -567,6 +610,7 @@ async function refillEdge() {
   } finally {
     edge.fetching = false;
   }
+  updateTtsPos();
   if (edge.waiting && !edge.audio) {
     if (edge.audioQ[edge.playIdx]) tryPlayNext();
     else if (edge.genDone) finishEdge();
@@ -610,6 +654,7 @@ $('stopBtn').onclick = () => {
   state.ttsPlaying = false;
   state.ttsPaused = false;
   $('playBtn').textContent = '▶';
+  $('ttsPos').textContent = '';
   clearHighlight();
 };
 
@@ -625,28 +670,64 @@ $('rateSlider').oninput = () => {
 };
 $('voiceSel').onchange = () => {
   savePrefs({ voice: $('voiceSel').value });
-  if (state.ttsPlaying) toast('切换语音将在重新点击朗读后生效');
+  if (state.ttsPlaying || state.ttsPaused) {
+    // 朗读中切语音：自动从当前段落用新语音重启（片段有缓存，几乎秒切）
+    const el = document.querySelector('.speaking');
+    const pEl = el && (el.tagName === 'P' ? el : el.closest('p'));
+    const p = pEl ? +pEl.dataset.p : 0;
+    startTTS(p);
+    toast('已切换语音，从当前段落重新朗读');
+  }
 };
+
+/* ================= 键盘快捷键 ================= */
+function jumpPara(delta) {
+  const i = state.curSeg + delta;
+  const seg = edge.segList[i];
+  if (!seg) { toast(delta > 0 ? '已经是最后一段了' : '已经是第一段了'); return; }
+  startTTS(seg.p);
+}
+
+document.addEventListener('keydown', e => {
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+  if (!$('readerView').classList.contains('active')) return;
+  if (e.code === 'Space') { e.preventDefault(); $('playBtn').click(); }
+  else if (e.key === 'Escape') { $('backBtn').click(); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); jumpPara(1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); jumpPara(-1); }
+});
 
 /* Python 端朗读事件：由定时轮询取回后分发 */
 window.__ttsEvent = ev => {
   if (ev.type === 'segment') {
+    state.curSeg = ev.index;
     highlightSeg(edge.segList[ev.index]);
+    if (edge.mode === 'sapi') $('ttsPos').textContent = (ev.index + 1) + '/' + edge.segList.length;
   } else if (ev.type === 'gen_done') {
     edge.genDone = true;
+    updateTtsPos();
     refillEdge();
   } else if (ev.type === 'state') {
     if (ev.state === 'speaking') {
       state.ttsPlaying = true; state.ttsPaused = false;
       $('playBtn').textContent = '⏸';
+      updateTtsPos();
     } else if (ev.state === 'finished' || ev.state === 'stopped') {
       state.ttsPlaying = false; state.ttsPaused = false;
       $('playBtn').textContent = '▶';
+      $('ttsPos').textContent = '';
       clearHighlight();
       if (ev.state === 'finished') toast('朗读完毕 ✓');
     }
   } else if (ev.type === 'error') {
     toast(ev.message || '朗读出错');
+    if (state.ttsPlaying || state.ttsPaused) {
+      state.ttsPlaying = false; state.ttsPaused = false;
+      $('playBtn').textContent = '▶';
+      $('ttsPos').textContent = '';
+      clearHighlight();
+    }
   }
 };
 
@@ -681,12 +762,27 @@ function changeFont(delta) {
 }
 $('fontUpBtn').onclick = () => changeFont(1);
 $('fontDownBtn').onclick = () => changeFont(-1);
+
+/* 衬线（宋体）/ 无衬线（雅黑）切换 */
+let fontSerif = false;
+function applyFontFam() {
+  document.documentElement.style.setProperty('--serif',
+    fontSerif ? '"SimSun","NSimSun",serif' : '"Microsoft YaHei","Segoe UI",sans-serif');
+  $('fontFamBtn').textContent = fontSerif ? '字体：宋体' : '字体：雅黑';
+}
+$('fontFamBtn').onclick = () => {
+  fontSerif = !fontSerif;
+  applyFontFam();
+  savePrefs({ fontSerif });
+};
 $('themeSel').onchange = () => {
   document.body.dataset.theme = $('themeSel').value;
   savePrefs({ theme: $('themeSel').value });
 };
 $('backBtn').onclick = () => {
   api().tts_stop();
+  stopAudio();
+  api().set_title('Edge 阅读器');
   showView('home');
   refreshHome();
 };
