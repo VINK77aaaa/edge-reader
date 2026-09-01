@@ -129,6 +129,14 @@
     opacity: .55; cursor: pointer; z-index: 10; display: none; transition: opacity .2s, width .15s;
   }
   #ttsDock:hover { opacity: 1; width: 190px; }
+  #ctxMenu {
+    position: fixed; z-index: 60; display: none; min-width: 150px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.2); padding: 4px;
+  }
+  #ctxMenu div { padding: 8px 12px; font-size: 13px; cursor: pointer; border-radius: 6px; color: var(--text); }
+  #ctxMenu div:hover { background: var(--accent-weak); color: var(--accent); }
+  ::selection { background: var(--hl); }
   #ttsBar .ctl {
     width: 38px; height: 38px; border-radius: 50%; border: none; cursor: pointer;
     background: var(--accent); color: #fff; font-size: 16px; flex-shrink: 0;
@@ -247,6 +255,7 @@
 <div id="toast"></div>
 <div id="dropMask">松开以加载文档</div>
 <div id="ttsDock" title="展开朗读控制条"></div>
+<div id="ctxMenu"></div>
 
 <script>
 const api = () => window.pywebview.api;
@@ -858,6 +867,51 @@ $('openDocBtn').onclick = async () => {
     await importDocResult(r);
   } catch (err) { toast('打开失败: ' + (err.message || err)); }
 };
+
+/* ================= 右键菜单：复制所选 / 复制本段 / 从这里朗读 ================= */
+function copyText(t) {
+  const done = () => toast('已复制');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(done, () => fallbackCopy(t, done));
+  } else {
+    fallbackCopy(t, done);
+  }
+}
+function fallbackCopy(t, done) {
+  const ta = document.createElement('textarea');
+  ta.value = t;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) { toast('复制失败，请手动选择后按 Ctrl+C'); }
+  ta.remove();
+}
+
+const ctx = $('ctxMenu');
+document.addEventListener('contextmenu', e => {
+  const p = e.target && e.target.closest ? e.target.closest('#contentBox p') : null;
+  if (!p || !$('readerView').classList.contains('active')) return; // 阅读页正文以外保留默认菜单
+  e.preventDefault();
+  const sel = (window.getSelection() ? window.getSelection().toString() : '').trim();
+  ctx.innerHTML = '';
+  const add = (label, fn) => {
+    const item = document.createElement('div');
+    item.textContent = label;
+    item.onclick = () => { ctx.style.display = 'none'; fn(); };
+    ctx.appendChild(item);
+  };
+  if (sel) add('复制所选文字', () => copyText(sel));
+  add('复制这一段', () => copyText(state.paras[+p.dataset.p] || ''));
+  add('从这里朗读', () => startTTS(+p.dataset.p));
+  const mw = 160, mh = (sel ? 3 : 2) * 36 + 8;
+  ctx.style.left = Math.min(e.clientX, window.innerWidth - mw - 8) + 'px';
+  ctx.style.top = Math.min(e.clientY, window.innerHeight - mh - 8) + 'px';
+  ctx.style.display = 'block';
+});
+document.addEventListener('click', e => {
+  if (ctx.style.display === 'block' && !ctx.contains(e.target)) ctx.style.display = 'none';
+});
 
 /* ================= 初始化 ================= */
 window.addEventListener('pywebviewready', async () => {
