@@ -124,6 +124,15 @@
     opacity: 0; pointer-events: none; transition: opacity .3s; z-index: 99; max-width: 80vw;
   }
   #toast.show { opacity: 1; }
+  #dropMask {
+    position: fixed; inset: 0; z-index: 50; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(11, 125, 216, .18); border: 3px dashed var(--accent);
+    font-size: 26px; font-weight: 700; color: var(--accent);
+    background-color: color-mix(in srgb, var(--accent-weak) 70%, transparent);
+    pointer-events: none;
+  }
+  #dropMask.show { display: flex; }
 
   /* ---------- 主题 ---------- */
   body[data-theme=sepia] {
@@ -167,8 +176,12 @@
       <input id="titleBox" placeholder="文章标题（留空则自动取正文开头）">
       <div class="opt-row">
         <label><input type="checkbox" id="organizeChk" checked> 智能整理段落（自动合并被硬换行打断的句子）</label>
-        <button class="btn" id="startBtn">开始阅读 →</button>
+        <div style="display:flex; gap:10px;">
+          <button class="btn ghost small" id="openDocBtn" style="padding:10px 16px;">📂 打开文档</button>
+          <button class="btn" id="startBtn">开始阅读 →</button>
+        </div>
       </div>
+      <p style="font-size:12px; color:var(--sub); margin-top:10px;">提示：也可以把 docx / doc / txt / md 文档直接拖进窗口</p>
     </div>
 
     <div class="card">
@@ -208,6 +221,7 @@
 </div>
 
 <div id="toast"></div>
+<div id="dropMask">松开以加载文档</div>
 
 <script>
 const api = () => window.pywebview.api;
@@ -675,6 +689,49 @@ $('backBtn').onclick = () => {
   api().tts_stop();
   showView('home');
   refreshHome();
+};
+
+/* ================= 文档导入（拖拽 / 打开） ================= */
+function bufToB64(buf) {
+  const u = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+async function importDocResult(r) {
+  if (!r) return;
+  if (r.error) { toast(r.error); return; }
+  const a = await api().save_article(r.title, r.text);
+  enterReader(a, 0);
+}
+
+window.addEventListener('dragover', e => {
+  e.preventDefault();
+  $('dropMask').classList.add('show');
+});
+window.addEventListener('dragleave', e => {
+  if (!e.relatedTarget) $('dropMask').classList.remove('show');
+});
+window.addEventListener('drop', async e => {
+  e.preventDefault();
+  $('dropMask').classList.remove('show');
+  const f = [...(e.dataTransfer ? e.dataTransfer.files : [])].find(f => /\.(docx|doc|txt|md)$/i.test(f.name));
+  if (!f) { toast('请拖入 docx / doc / txt / md 文档'); return; }
+  toast('正在解析 ' + f.name + ' …');
+  try {
+    const b64 = bufToB64(await f.arrayBuffer());
+    const r = await api().load_document_bytes(b64, f.name);
+    await importDocResult(r);
+  } catch (err) { toast('文档读取失败: ' + (err.message || err)); }
+});
+
+$('openDocBtn').onclick = async () => {
+  toast('正在解析文档…');
+  try {
+    const r = await api().pick_document();
+    await importDocResult(r);
+  } catch (err) { toast('打开失败: ' + (err.message || err)); }
 };
 
 /* ================= 初始化 ================= */

@@ -60,6 +60,7 @@ _edge_segs = []
 _edge_paths = []
 _edge_gen_done = False
 _edge_error = None
+_window = None  # webview 窗口引用（放模块级，避免被 pywebview 扫描 API 对象）
 
 
 class ReaderApi:
@@ -142,6 +143,99 @@ class ReaderApi:
         db['prefs'].update(prefs or {})
         self._save_db(db)
         return True
+
+    # ---------------- 文档导入（docx / doc / txt / md） ----------------
+
+    @staticmethod
+    def _parse_docx(data):
+        import io
+        from docx import Document
+        doc = Document(io.BytesIO(data))
+        paras = [p.text.strip() for p in doc.paragraphs]
+        return '\n\n'.join(p for p in paras if p)
+
+    @staticmethod
+    def _parse_doc_via_word(path):
+        """老式 .doc 二进制格式：调用本机 Word 转出文本（需安装 Office Word）。"""
+        import tempfile
+        pythoncom.CoInitialize()
+        word = None
+        try:
+            word = win32com.client.Dispatch('Word.Application')
+            word.Visible = False
+            doc = word.Documents.Open(os.path.abspath(path), ReadOnly=True)
+            text = doc.Content.Text
+            doc.Close(False)
+            text = text.replace('\r\x07', '\n').replace('\r', '\n')
+            return '\n\n'.join(p.strip() for p in text.split('\n') if p.strip())
+        finally:
+            if word:
+                word.Quit()
+            pythoncom.CoUninitialize()
+
+    def load_document_bytes(self, b64, filename):
+        """前端拖入文件：内容以 base64 传入，解析出正文文本。"""
+        try:
+            data = base64.b64decode(b64)
+        except Exception:
+            return {'error': '文件内容读取失败'}
+        ext = os.path.splitext(filename)[1].lower()
+        title = os.path.splitext(filename)[0]
+        try:
+            if ext == '.docx':
+                text = self._parse_docx(data)
+            elif ext == '.doc':
+                import tempfile
+                fd, tmp = tempfile.mkstemp(suffix='.doc')
+                with os.fdopen(fd, 'wb') as f:
+                    f.write(data)
+                try:
+                    text = self._parse_doc_via_word(tmp)
+                finally:
+                    os.remove(tmp)
+            elif ext in ('.txt', '.md'):
+                text = data.decode('utf-8', errors='ignore').replace('\r\n', '\n')
+            else:
+                return {'error': '仅支持 docx / doc / txt / md 文档'}
+        except Exception as exc:
+            if ext == '.doc':
+                return {'error': '解析 .doc 需要本机安装 Word。可先另存为 .docx 再拖入（%s）' % exc}
+            return {'error': '文档解析失败: %s' % exc}
+        if not text.strip():
+            return {'error': '文档里没有可读取的文字'}
+        return {'title': title, 'text': text}
+
+    def pick_document(self):
+        """弹文件选择框，返回解析后的正文。"""
+        global _window
+        if not _window:
+            return {'error': '窗口未就绪'}
+        result = _window.create_file_dialog(
+            webview.OPEN_DIALOG, allow_multiple=False,
+            file_types=('文档 (*.docx;*.doc;*.txt;*.md)', '所有文件 (*.*)'))
+        if not result:
+            return None
+        path = result[0]
+        ext = os.path.splitext(path)[1].lower()
+        title = os.path.splitext(os.path.basename(path))[0]
+        try:
+            with open(path, 'rb') as f:
+                data = f.read()
+            if ext == '.docx':
+                text = self._parse_docx(data)
+            elif ext == '.doc':
+                text = self._parse_doc_via_word(path)
+            elif ext in ('.txt', '.md'):
+                text = data.decode('utf-8', errors='ignore').replace('\r\n', '\n')
+            else:
+                return {'error': '仅支持 docx / doc / txt / md 文档'}
+        except Exception as exc:
+            if ext == '.doc':
+                return {'error': '解析 .doc 需要本机安装 Word。可先另存为 .docx 再打开（%s）' % exc}
+            return {'error': '文档解析失败: %s' % exc}
+        if not text.strip():
+            return {'error': '文档里没有可读取的文字'}
+        return {'title': title, 'text': text}
 
     # ---------------- 语音朗读（SAPI，即 Edge“大声朗读”同款系统引擎） ----------------
 
@@ -374,6 +468,8 @@ def main():
         'Edge 阅读器', resource_path(os.path.join('web', 'index.html')), js_api=api,
         width=1040, height=780, min_size=(780, 560),
     )
+    global _window
+    _window = window
     webview.start(debug=False)
 
 
