@@ -22,9 +22,8 @@
   }
   .view { display: none; height: 100vh; }
   .view.active { display: flex; flex-direction: column; }
-
-  /* ---------- 首页 ---------- */
-  .home-wrap { max-width: 760px; width: 100%; margin: 0 auto; padding: 36px 24px 24px; overflow-y: auto; }
+  #homeView.active { overflow-y: auto; } /* 滚动条贴窗口右缘，而不是浮在内容列旁 */
+  .home-wrap { max-width: 760px; width: 100%; margin: 0 auto; padding: 36px 24px 24px; }
   .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
   .logo .icon {
     width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg, #0b7dd8, #37c6f4);
@@ -34,6 +33,11 @@
   .logo p { color: var(--sub); font-size: 13px; margin-top: 2px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
   .card h2 { font-size: 15px; margin-bottom: 12px; color: var(--text); }
+  #histToggle { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px; }
+  #histToggle:hover { color: var(--accent); }
+  #histToggle .arrow { margin-left: auto; font-size: 12px; color: var(--sub); transition: transform .15s; }
+  #histToggle.open .arrow { transform: rotate(90deg); }
+  #histCount { font-size: 12px; color: var(--sub); font-weight: normal; }
   textarea#pasteBox {
     width: 100%; height: 180px; resize: vertical; border: 1px solid var(--line); border-radius: 10px;
     padding: 12px 14px; font-size: 14px; font-family: inherit; color: var(--text); outline: none;
@@ -168,7 +172,7 @@
     </div>
 
     <div class="card">
-      <h2>历史记录</h2>
+      <h2 id="histToggle" title="点击展开 / 收起">历史记录 <span id="histCount"></span><span id="histArrow" class="arrow">▸</span></h2>
       <div id="histList"></div>
     </div>
   </div>
@@ -274,10 +278,24 @@ function splitParaChunks(text) {
   return chunks.length ? chunks : [text];
 }
 
+/* ================= 历史记录折叠 ================= */
+let histOpen = false;
+function applyHistOpen() {
+  $('histList').style.display = histOpen ? '' : 'none';
+  $('histToggle').classList.toggle('open', histOpen);
+  $('histArrow').textContent = histOpen ? '▾' : '▸';
+}
+$('histToggle').onclick = () => {
+  histOpen = !histOpen;
+  applyHistOpen();
+  savePrefs({ histOpen });
+};
+
 /* ================= 首页 ================= */
 function refreshHome() {
   api().get_articles().then(list => {
     list = list || [];
+    $('histCount').textContent = list.length ? list.length + ' 篇' : '';
     const box = $('histList');
     box.innerHTML = '';
     if (!list.length) {
@@ -347,6 +365,8 @@ function applyPrefs() {
     updateLhBtn();
     if (p.rate !== undefined) $('rateSlider').value = p.rate;
     updateRateVal();
+    histOpen = !!p.histOpen;
+    applyHistOpen();
     if (p.voice) {
       // 兼容旧版保存的本机语音名
       $('voiceSel').value = /^(edge:|local:)/.test(p.voice) ? p.voice : 'local:' + p.voice;
