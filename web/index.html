@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Edge 阅读器</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #2b2f36; --sub: #8a919c;
+    --line: #e4e7ec; --accent: #0b7dd8; --accent-weak: #e8f3fc;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); height: 100vh; overflow: hidden;
+  }
+  .view { display: none; height: 100vh; }
+  .view.active { display: flex; flex-direction: column; }
+
+  /* ---------- 首页 ---------- */
+  .home-wrap { max-width: 760px; width: 100%; margin: 0 auto; padding: 36px 24px 24px; overflow-y: auto; }
+  .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+  .logo .icon {
+    width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg, #0b7dd8, #37c6f4);
+    display: flex; align-items: center; justify-content: center; color: #fff; font-size: 24px;
+  }
+  .logo h1 { font-size: 22px; }
+  .logo p { color: var(--sub); font-size: 13px; margin-top: 2px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .card h2 { font-size: 15px; margin-bottom: 12px; color: var(--text); }
+  textarea#pasteBox {
+    width: 100%; height: 180px; resize: vertical; border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; font-size: 14px; font-family: inherit; color: var(--text); outline: none;
+  }
+  textarea#pasteBox:focus { border-color: var(--accent); }
+  input#titleBox {
+    width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
+    font-size: 14px; font-family: inherit; margin-top: 12px; outline: none; color: var(--text);
+  }
+  input#titleBox:focus { border-color: var(--accent); }
+  .opt-row { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; gap: 12px; flex-wrap: wrap; }
+  .opt-row label { font-size: 13px; color: var(--sub); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .btn {
+    border: none; border-radius: 10px; padding: 10px 22px; font-size: 14px; font-family: inherit;
+    cursor: pointer; background: var(--accent); color: #fff;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn.ghost { background: var(--accent-weak); color: var(--accent); }
+  .btn.small { padding: 6px 14px; font-size: 13px; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  .hist-item {
+    display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .hist-item:hover { background: var(--accent-weak); border-color: var(--line); }
+  .hist-item .info { flex: 1; min-width: 0; }
+  .hist-item .t { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hist-item .d { font-size: 12px; color: var(--sub); margin-top: 3px; }
+  .bar { height: 4px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+  .del-btn { border: none; background: none; color: var(--sub); cursor: pointer; font-size: 16px; padding: 4px 8px; border-radius: 6px; }
+  .del-btn:hover { color: #e5484d; background: #fdebec; }
+  .empty { text-align: center; color: var(--sub); font-size: 13px; padding: 18px 0; }
+
+  /* ---------- 阅读页 ---------- */
+  #readerToolbar {
+    display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+    background: var(--card); border-bottom: 1px solid var(--line); flex-shrink: 0; flex-wrap: wrap;
+  }
+  #readerToolbar .title { flex: 1; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tool-btn {
+    border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 8px;
+    padding: 5px 10px; font-size: 13px; font-family: inherit; cursor: pointer;
+  }
+  .tool-btn:hover { border-color: var(--accent); color: var(--accent); }
+  select.tool-btn { padding: 5px 6px; }
+  #readerScroll { flex: 1; overflow-y: auto; }
+  .article {
+    max-width: 720px; margin: 0 auto; padding: 40px 28px 140px;
+  }
+  .article h1 { font-size: 26px; margin-bottom: 8px; line-height: 1.4; }
+  .article .meta { color: var(--sub); font-size: 13px; margin-bottom: 32px; }
+  .article p {
+    font-size: var(--fs, 19px); line-height: var(--lh, 1.9);
+    margin-bottom: calc(var(--fs, 19px) * 0.9); text-align: justify;
+    font-family: var(--serif, "Microsoft YaHei"); transition: background .2s;
+    border-radius: 6px; padding: 2px 6px; margin-left: -6px; margin-right: -6px;
+  }
+  .article p.heading { font-size: calc(var(--fs, 19px) * 1.25); font-weight: 700; text-align: center; }
+  .article .speaking { background: var(--hl); border-radius: 4px; box-shadow: 0 0 0 2px var(--hl); }
+  #ttsBar {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px;
+    display: flex; align-items: center; gap: 14px; padding: 12px 20px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.12); flex-wrap: wrap; max-width: 92vw; z-index: 10;
+  }
+  #ttsBar .ctl {
+    width: 42px; height: 42px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--accent); color: #fff; font-size: 17px;
+  }
+  #ttsBar .ctl.stop { background: var(--line); color: var(--text); }
+  #ttsBar label { font-size: 12px; color: var(--sub); display: flex; align-items: center; gap: 6px; }
+  #ttsBar input[type=range] { width: 110px; accent-color: var(--accent); }
+  #ttsBar select {
+    border: 1px solid var(--line); border-radius: 8px; padding: 5px 6px; font-size: 12px;
+    max-width: 150px; font-family: inherit; color: var(--text); background: var(--card);
+  }
+  #toast {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    background: #333c48; color: #fff; padding: 9px 18px; border-radius: 10px; font-size: 13px;
+    opacity: 0; pointer-events: none; transition: opacity .3s; z-index: 99; max-width: 80vw;
+  }
+  #toast.show { opacity: 1; }
+
+  /* ---------- 主题 ---------- */
+  body[data-theme=sepia] {
+    --bg: #f4ecd8; --card: #fbf6ea; --text: #433422; --sub: #a08e6f;
+    --line: #e5d9bd; --accent: #b07b3f; --accent-weak: #f1e5cd; --hl: #f0dcae;
+  }
+  body[data-theme=dark] {
+    --bg: #0d1117; --card: #161b22; --text: #e6edf3; --sub: #7d8590;
+    --line: #30363d; --accent: #58a6ff; --accent-weak: #1c2735; --hl: #26456b;
+  }
+</style>
+</head>
+<body data-theme="light">
+
+<!-- ============ 首页 ============ -->
+<div id="homeView" class="view active">
+  <div class="home-wrap">
+    <div class="logo">
+      <div class="icon">📖</div>
+      <div>
+        <h1>Edge 阅读器</h1>
+        <p>粘贴文字 → 沉浸式阅读 → 系统语音朗读</p>
+      </div>
+    </div>
+
+    <div class="card" id="lastReadCard" style="display:none">
+      <h2>继续上次阅读</h2>
+      <div class="hist-item" id="lastReadItem">
+        <div class="info">
+          <div class="t"></div>
+          <div class="d"></div>
+          <div class="bar"><i></i></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>新建阅读</h2>
+      <textarea id="pasteBox" placeholder="把文章内容粘贴到这里……（支持从网页、Word、PDF 等任意地方复制）"></textarea>
+      <input id="titleBox" placeholder="文章标题（留空则自动取正文开头）">
+      <div class="opt-row">
+        <label><input type="checkbox" id="organizeChk" checked> 智能整理段落（自动合并被硬换行打断的句子）</label>
+        <button class="btn" id="startBtn">开始阅读 →</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>历史记录</h2>
+      <div id="histList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 阅读页 ============ -->
+<div id="readerView" class="view">
+  <div id="readerToolbar">
+    <button class="tool-btn" id="backBtn">← 返回</button>
+    <div class="title" id="readerTitle"></div>
+    <button class="tool-btn" id="fontDownBtn">A－</button>
+    <button class="tool-btn" id="fontUpBtn">A＋</button>
+    <button class="tool-btn" id="lhBtn">行距：标准</button>
+    <select class="tool-btn" id="themeSel">
+      <option value="light">浅色</option>
+      <option value="sepia">米黄</option>
+      <option value="dark">深色</option>
+    </select>
+  </div>
+  <div id="readerScroll">
+    <article class="article">
+      <h1 id="articleTitle"></h1>
+      <div class="meta" id="articleMeta"></div>
+      <div id="contentBox"></div>
+    </article>
+  </div>
+  <div id="ttsBar">
+    <button class="ctl" id="playBtn" title="朗读 / 暂停 / 继续">▶</button>
+    <button class="ctl stop" id="stopBtn" title="停止">■</button>
+    <label>语速<input type="range" id="rateSlider" min="-5" max="8" value="1"><span id="rateVal">110%</span></label>
+    <label>语音<select id="voiceSel"><option value="">默认</option></select></label>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const api = () => window.pywebview.api;
+const $ = id => document.getElementById(id);
+
+const state = {
+  article: null,     // 当前阅读的文章（含 text）
+  paras: [],         // 整理后的段落
+  segs: [],          // 朗读块（与页面上的句子一一对应）
+  ttsPlaying: false,
+  ttsPaused: false,
+  saveTimer: null,
+};
+
+function toast(msg) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+/* ================= 段落智能整理 ================= */
+const END_PUNCT = /[。！？；…”"’']*[。！？；!?;…]"?$/;
+const LIST_START = /^\s*([0-9]{1,3}[、.．]\s*|[一二三四五六七八九十百]{1,4}[、.]\s*|[(（][0-9一二三四五][)）]|[•●○▪◆*–—-]\s+|#{1,6}\s|第[0-9一二三四五六七八九十百千]{1,5}[章节回讲幕]|【.+】)$/;
+const END_ANY = /[。！？!?；;…”"）)】\.\!\?;:]$/;
+
+function organizeText(raw) {
+  const lines = raw.replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').split('\n');
+  const paras = [];
+  let buf = '';
+  const flush = () => { if (buf.trim()) paras.push(buf.trim()); buf = ''; };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) { flush(); continue; }
+    if (!buf) { buf = line; continue; }
+
+    const bufIsHeading = buf.length <= 25 && !END_ANY.test(buf);
+    const lineIsList = LIST_START.test(line);
+    const lineIsHeading = line.length <= 25 && !END_ANY.test(line);
+
+    // 上一段已收尾 / 新行像列表项或小标题 → 换段；否则视为被硬换行打断，拼接
+    if (END_ANY.test(buf) || bufIsHeading || lineIsList || lineIsHeading) {
+      flush();
+      buf = line;
+    } else {
+      // 中文直接拼接；英文句子间补空格
+      if (/[A-Za-z0-9,;]$/.test(buf) && /^[A-Za-z0-9(\[]/.test(line)) buf += ' ';
+      buf += line;
+    }
+  }
+  flush();
+  return paras.length ? paras : ['（空内容）'];
+}
+
+/* 长段落按句子切块（每块不超过 120 字），渲染和朗读都按块对齐，实现逐句高亮 */
+function splitParaChunks(text) {
+  if (text.length <= 120) return [text];
+  const parts = text.split(/(?<=[。！？；!?;…])/).filter(s => s.trim());
+  const chunks = [];
+  let cur = '';
+  for (const s of parts) {
+    if (cur && (cur + s).length > 120) { chunks.push(cur); cur = s; }
+    else cur += s;
+  }
+  if (cur.trim()) chunks.push(cur);
+  return chunks.length ? chunks : [text];
+}
+
+/* ================= 首页 ================= */
+function refreshHome() {
+  api().get_articles().then(list => {
+    list = list || [];
+    const box = $('histList');
+    box.innerHTML = '';
+    if (!list.length) {
+      box.innerHTML = '<div class="empty">还没有文章，粘贴一段文字开始吧</div>';
+    }
+    list.forEach(a => {
+      const item = document.createElement('div');
+      item.className = 'hist-item';
+      const pct = Math.round((a.progress || 0) * 100);
+      item.innerHTML = `
+        <div class="info">
+          <div class="t">${esc(a.title)}</div>
+          <div class="d">${esc(a.created)} · 已读 ${pct}%</div>
+          <div class="bar"><i style="width:${pct}%"></i></div>
+        </div>
+        <button class="del-btn" title="删除">🗑</button>`;
+      item.querySelector('.info').onclick = () => openArticle(a.id);
+      item.querySelector('.del-btn').onclick = async e => {
+        e.stopPropagation();
+        if (!confirm(`删除《${a.title}》？`)) return;
+        await api().delete_article(a.id);
+        refreshHome();
+      };
+      box.appendChild(item);
+    });
+    if (list.length && list[0].progress > 0.002) {
+      const a = list[0];
+      $('lastReadCard').style.display = '';
+      const item = $('lastReadItem');
+      item.querySelector('.t').textContent = a.title;
+      item.querySelector('.d').textContent = `读到约 ${Math.round(a.progress * 100)}%，点击继续`;
+      item.querySelector('.bar i').style.width = Math.round(a.progress * 100) + '%';
+      item.onclick = () => openArticle(a.id);
+    } else {
+      $('lastReadCard').style.display = 'none';
+    }
+  });
+}
+
+function esc(s) {
+  return String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+$('startBtn').onclick = async () => {
+  const text = $('pasteBox').value.trim();
+  if (!text) { toast('请先粘贴文章内容'); return; }
+  const paras = $('organizeChk').checked ? organizeText(text) : text.split(/\n+/).map(s => s.trim()).filter(Boolean);
+  let title = $('titleBox').value.trim();
+  if (!title) {
+    title = paras[0].length <= 30 ? paras[0] : paras[0].slice(0, 20);
+  }
+  const a = await api().save_article(title, $('pasteBox').value);
+  $('pasteBox').value = '';
+  $('titleBox').value = '';
+  enterReader(a, 0);
+};
+
+/* ================= 阅读页 ================= */
+function applyPrefs() {
+  api().get_prefs().then(p => {
+    p = p || {};
+    document.body.dataset.theme = p.theme || 'light';
+    $('themeSel').value = p.theme || 'light';
+    document.documentElement.style.setProperty('--fs', (p.fontSize || 19) + 'px');
+    document.documentElement.style.setProperty('--lh', p.lineHeight || 1.9);
+    lhState = p.lineHeight || 1.9;
+    updateLhBtn();
+    if (p.rate !== undefined) $('rateSlider').value = p.rate;
+    updateRateVal();
+    if (p.voice) {
+      // 兼容旧版保存的本机语音名
+      $('voiceSel').value = /^(edge:|local:)/.test(p.voice) ? p.voice : 'local:' + p.voice;
+      if ($('voiceSel').selectedIndex < 0) $('voiceSel').selectedIndex = 0;
+    }
+  });
+}
+
+function savePrefs(patch) { api().save_prefs(patch); }
+
+function enterReader(article, startPara) {
+  state.article = article;
+  state.paras = organizeText(article.text);
+  state.segs = [];
+  $('readerTitle').textContent = article.title;
+  $('articleTitle').textContent = article.title;
+  $('articleMeta').textContent = article.created + ' · ' + state.paras.length + ' 段 · 朗读时当前句子会高亮，点击任意段落可从该处开始';
+  const box = $('contentBox');
+  box.innerHTML = '';
+  state.paras.forEach((t, i) => {
+    const p = document.createElement('p');
+    p.dataset.p = i;
+    if (t.length <= 25 && !END_ANY.test(t)) {
+      p.className = 'heading';
+      p.textContent = t;
+      state.segs.push({ p: i, t, span: p });
+    } else {
+      splitParaChunks(t).forEach(chunk => {
+        const s = document.createElement('span');
+        s.className = 'sent';
+        s.textContent = chunk;
+        p.appendChild(s);
+        state.segs.push({ p: i, t: chunk, span: s });
+      });
+    }
+    p.onclick = () => startTTS(i);
+    box.appendChild(p);
+  });
+  showView('reader');
+  $('readerScroll').scrollTop = 0;
+  $('playBtn').textContent = '▶';
+  state.ttsPlaying = false;
+  state.ttsPaused = false;
+  if (startPara > 0) setTimeout(() => startTTS(startPara), 300);
+}
+
+function openArticle(id) {
+  api().get_article(id).then(a => {
+    if (!a) { toast('文章不存在'); return; }
+    const savedPara = a.para || 0;
+    enterReader(a, 0);
+    if (a.progress > 0.002) {
+      const sc = $('readerScroll');
+      setTimeout(() => {
+        sc.scrollTop = a.progress * (sc.scrollHeight - sc.clientHeight);
+        if (savedPara > 0) {
+          const el = document.querySelector(`p[data-p="${savedPara}"]`);
+          if (el) el.scrollIntoView({ block: 'center' });
+        }
+      }, 50);
+    }
+  });
+}
+
+function showView(name) {
+  $('homeView').classList.toggle('active', name === 'home');
+  $('readerView').classList.toggle('active', name === 'reader');
+}
+
+/* 进度保存（滚动时节流保存） */
+$('readerScroll').addEventListener('scroll', () => {
+  if (!state.article) return;
+  clearTimeout(state.saveTimer);
+  state.saveTimer = setTimeout(() => {
+    const sc = $('readerScroll');
+    const ratio = sc.scrollHeight <= sc.clientHeight ? 1 : sc.scrollTop / (sc.scrollHeight - sc.clientHeight);
+    const cur = document.querySelector('.speaking');
+    const paraEl = cur && (cur.tagName === 'P' ? cur : cur.closest('p'));
+    api().save_progress(state.article.id, Math.min(1, Math.max(0, ratio)), paraEl ? +paraEl.dataset.p : 0);
+  }, 800);
+});
+
+/* ================= 朗读控制 ================= */
+async function loadVoices() {
+  const voices = await api().tts_voices();
+  const sel = $('voiceSel');
+  sel.innerHTML =
+    '<optgroup label="Edge 在线语音（更自然，需联网）">' +
+      '<option value="edge:zh-CN-XiaoxiaoNeural">晓晓（女·温柔）</option>' +
+      '<option value="edge:zh-CN-YunjianNeural">云健（男·浑厚）</option>' +
+      '<option value="edge:zh-CN-YunxiNeural">云希（男·年轻）</option>' +
+      '<option value="edge:zh-CN-YunyangNeural">云扬（男·新闻播报）</option>' +
+      '<option value="edge:zh-CN-XiaoyiNeural">晓伊（女·活泼）</option>' +
+    '</optgroup>' +
+    '<optgroup label="本机语音（离线）">';
+  (voices || []).forEach(v => {
+    const o = document.createElement('option');
+    o.value = 'local:' + v; o.textContent = v;
+    sel.appendChild(o);
+  });
+  sel.insertAdjacentHTML('beforeend', '</optgroup>');
+}
+
+const edge = { audioQ: {}, playIdx: 0, fillIdx: 0, genDone: false, audio: null, waiting: false,
+               fetching: false, mode: 'sapi', segList: [] };
+
+function startTTS(fromPara) {
+  const segs = state.segs.filter(s => s.p >= fromPara);
+  if (!segs.length) return;
+  clearHighlight();
+  stopAudio();
+  edge.audioQ = {}; edge.playIdx = 0; edge.fillIdx = 0; edge.genDone = false;
+  edge.waiting = false; edge.fetching = false; edge.segList = segs;
+  const voice = $('voiceSel').value || 'edge:zh-CN-XiaoxiaoNeural';
+  edge.mode = voice.startsWith('edge:') ? 'edge' : 'sapi';
+  api().tts_start(segs.map(s => ({ p: s.p, t: s.t })), voice, +$('rateSlider').value).then(() => {
+    if (edge.mode === 'edge') { edge.waiting = true; refillEdge(); }
+  });
+}
+
+function stopAudio() {
+  if (edge.audio) { edge.audio.pause(); edge.audio.onended = null; edge.audio = null; }
+}
+
+/* 高亮当前朗读块（句子/标题），并保证滚动可见 */
+function highlightSeg(seg) {
+  clearHighlight();
+  if (!seg || !seg.span) return;
+  seg.span.classList.add('speaking');
+  const sc = $('readerScroll');
+  const top = seg.span.getBoundingClientRect().top - sc.getBoundingClientRect().top;
+  if (top < sc.clientHeight * 0.25 || top > sc.clientHeight * 0.7) {
+    sc.scrollTop += top - sc.clientHeight * 0.35;
+  }
+}
+
+function finishEdge() {
+  state.ttsPlaying = false; state.ttsPaused = false;
+  $('playBtn').textContent = '▶';
+  clearHighlight();
+  toast('朗读完毕 ✓');
+}
+
+function tryPlayNext() {
+  if (edge.audio) return;
+  const item = edge.audioQ[edge.playIdx];
+  if (!item) {
+    if (edge.genDone) { finishEdge(); return; }
+    edge.waiting = true;   // 等 refillEdge 取到音频后继续
+    return;
+  }
+  edge.waiting = false;
+  highlightSeg(edge.segList[edge.playIdx]);
+  const a = new Audio(item.src);
+  edge.audio = a;
+  a.onended = () => {
+    edge.audio = null;
+    edge.playIdx++;
+    refillEdge().then(tryPlayNext);
+  };
+  a.play().catch(e => { edge.audio = null; toast('音频播放失败: ' + e.message); });
+}
+
+/* 从 Python 拉取已合成好的分段音频，直到取空或全部合成完 */
+async function refillEdge() {
+  if (edge.fetching) return;
+  edge.fetching = true;
+  try {
+    while (!edge.genDone) {
+      if (edge.audioQ[edge.fillIdx] !== undefined) { edge.fillIdx++; continue; }
+      const r = await api().tts_get_audio(edge.fillIdx);
+      if (r && r.b64) {
+        edge.audioQ[edge.fillIdx] = { p: r.p, src: 'data:audio/mpeg;base64,' + r.b64 };
+        edge.fillIdx++;
+        continue;
+      }
+      if (r && r.done) {
+        edge.genDone = true;
+        if (r.error) toast(r.error);
+        break;
+      }
+      break; // 当前段还没合成好，靠下次轮询再来
+    }
+  } finally {
+    edge.fetching = false;
+  }
+  if (edge.waiting && !edge.audio) {
+    if (edge.audioQ[edge.playIdx]) tryPlayNext();
+    else if (edge.genDone) finishEdge();
+  }
+}
+
+function clearHighlight() {
+  document.querySelectorAll('.speaking').forEach(el => el.classList.remove('speaking'));
+}
+
+$('playBtn').onclick = () => {
+  if (!state.article) return;
+  if (edge.mode === 'edge' && state.ttsPlaying) {
+    // 在线语音模式：暂停/恢复由前端 Audio 控制
+    if (edge.audio) {
+      if (edge.audio.paused) { edge.audio.play(); $('playBtn').textContent = '⏸'; }
+      else { edge.audio.pause(); $('playBtn').textContent = '▶'; }
+    } else {
+      toast('正在加载语音，请稍候…');
+    }
+    return;
+  }
+  if (state.ttsPlaying && !state.ttsPaused) {
+    state.ttsPaused = true;
+    $('playBtn').textContent = '▶';
+    api().tts_pause();
+  } else if (state.ttsPlaying && state.ttsPaused) {
+    state.ttsPaused = false;
+    $('playBtn').textContent = '⏸';
+    api().tts_resume();
+  } else {
+    startTTS(0);
+  }
+};
+
+$('stopBtn').onclick = () => {
+  api().tts_stop();
+  stopAudio();
+  edge.audioQ = {}; edge.playIdx = 0; edge.fillIdx = 0;
+  edge.genDone = false; edge.waiting = false; edge.fetching = false;
+  state.ttsPlaying = false;
+  state.ttsPaused = false;
+  $('playBtn').textContent = '▶';
+  clearHighlight();
+};
+
+function updateRateVal() {
+  $('rateVal').textContent = (100 + (+$('rateSlider').value) * 10) + '%';
+}
+
+$('rateSlider').oninput = () => {
+  updateRateVal();
+  api().tts_set_rate(+$('rateSlider').value);
+  savePrefs({ rate: +$('rateSlider').value });
+  if (edge.mode === 'edge' && state.ttsPlaying) toast('在线语音的语速将在重新开始朗读后生效');
+};
+$('voiceSel').onchange = () => {
+  savePrefs({ voice: $('voiceSel').value });
+  if (state.ttsPlaying) toast('切换语音将在重新点击朗读后生效');
+};
+
+/* Python 端朗读事件：由定时轮询取回后分发 */
+window.__ttsEvent = ev => {
+  if (ev.type === 'segment') {
+    highlightSeg(edge.segList[ev.index]);
+  } else if (ev.type === 'gen_done') {
+    edge.genDone = true;
+    refillEdge();
+  } else if (ev.type === 'state') {
+    if (ev.state === 'speaking') {
+      state.ttsPlaying = true; state.ttsPaused = false;
+      $('playBtn').textContent = '⏸';
+    } else if (ev.state === 'finished' || ev.state === 'stopped') {
+      state.ttsPlaying = false; state.ttsPaused = false;
+      $('playBtn').textContent = '▶';
+      clearHighlight();
+      if (ev.state === 'finished') toast('朗读完毕 ✓');
+    }
+  } else if (ev.type === 'error') {
+    toast(ev.message || '朗读出错');
+  }
+};
+
+function pollTTS() {
+  if (!window.pywebview || !api().tts_poll) return;
+  api().tts_poll().then(events => {
+    (events || []).forEach(window.__ttsEvent);
+  }).catch(() => {});
+  if (edge.mode === 'edge' && state.ttsPlaying) refillEdge();
+}
+
+/* ================= 排版工具 ================= */
+let lhState = 1.9;
+const LH_STEPS = [1.6, 1.9, 2.2];
+function updateLhBtn() {
+  $('lhBtn').textContent = '行距：' + (lhState <= 1.6 ? '紧凑' : lhState <= 1.9 ? '标准' : '宽松');
+}
+$('lhBtn').onclick = () => {
+  const i = LH_STEPS.indexOf(lhState);
+  lhState = LH_STEPS[(i + 1) % LH_STEPS.length];
+  document.documentElement.style.setProperty('--lh', lhState);
+  updateLhBtn();
+  savePrefs({ lineHeight: lhState });
+};
+function changeFont(delta) {
+  const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fs')) || 19;
+  const next = Math.min(30, Math.max(14, cur + delta));
+  document.documentElement.style.setProperty('--fs', next + 'px');
+  savePrefs({ fontSize: next });
+}
+$('fontUpBtn').onclick = () => changeFont(1);
+$('fontDownBtn').onclick = () => changeFont(-1);
+$('themeSel').onchange = () => {
+  document.body.dataset.theme = $('themeSel').value;
+  savePrefs({ theme: $('themeSel').value });
+};
+$('backBtn').onclick = () => {
+  api().tts_stop();
+  showView('home');
+  refreshHome();
+};
+
+/* ================= 初始化 ================= */
+window.addEventListener('pywebviewready', () => {
+  applyPrefs();
+  loadVoices();
+  refreshHome();
+  setInterval(pollTTS, 150);
+});
+</script>
+</body>
+</html>

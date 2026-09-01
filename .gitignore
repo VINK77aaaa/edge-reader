@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# 日志与临时文件
+*.log
+
+# 运行时产生的本地数据（朗读缓存、测试输出）
+tts_cache/
+test_run.log
