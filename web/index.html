@@ -462,14 +462,14 @@ function enterReader(article, startPara) {
     if (t.length <= 25 && !END_ANY.test(t)) {
       p.className = 'heading';
       p.textContent = t;
-      state.segs.push({ p: i, t, span: p });
+      state.segs.push({ p: i, t, span: p, gi: state.segs.length });
     } else {
       splitParaChunks(t).forEach(chunk => {
         const s = document.createElement('span');
         s.className = 'sent';
         s.textContent = chunk;
         p.appendChild(s);
-        state.segs.push({ p: i, t: chunk, span: s });
+        state.segs.push({ p: i, t: chunk, span: s, gi: state.segs.length });
       });
     }
     p.onclick = () => {
@@ -480,6 +480,7 @@ function enterReader(article, startPara) {
     box.appendChild(p);
   });
   showView('reader');
+  $('readProgress').style.width = '0%';
   $('readerScroll').scrollTop = 0;
   $('playBtn').textContent = '▶';
   state.ttsPlaying = false;
@@ -510,13 +511,12 @@ function showView(name) {
   $('readerView').classList.toggle('active', name === 'reader');
 }
 
-/* 阅读进度：顶部细线即时更新，保存节流 */
+/* 阅读进度：顶部细线跟随朗读高亮位置（不随滚动条行程变化），保存节流 */
 $('readerScroll').addEventListener('scroll', () => {
   if (!state.article) return;
   const sc = $('readerScroll');
   const ratio = sc.scrollHeight <= sc.clientHeight ? 1 : sc.scrollTop / (sc.scrollHeight - sc.clientHeight);
   const pct = Math.min(100, Math.max(0, Math.round(ratio * 100)));
-  $('readProgress').style.width = pct + '%';
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(() => {
     const cur = document.querySelector('.speaking');
@@ -574,6 +574,11 @@ function highlightSeg(seg) {
   if (!seg || !seg.span) return;
   seg.span.classList.add('speaking');
   if (seg.idx !== undefined) state.curSeg = seg.idx;
+  // 顶部进度线 = 当前高亮句在整篇文章中的位置（全文总句数为准，而非本次朗读的起点）
+  const total = state.segs.length;
+  if (total > 1 && seg.gi !== undefined) {
+    $('readProgress').style.width = Math.round(seg.gi / (total - 1) * 100) + '%';
+  }
   const sc = $('readerScroll');
   const top = seg.span.getBoundingClientRect().top - sc.getBoundingClientRect().top;
   if (top < sc.clientHeight * 0.25 || top > sc.clientHeight * 0.7) {
@@ -584,6 +589,7 @@ function highlightSeg(seg) {
 function finishEdge() {
   state.ttsPlaying = false; state.ttsPaused = false;
   $('playBtn').textContent = '▶';
+  $('readProgress').style.width = '100%';
   clearHighlight();
   showTtsBar();
   toast('朗读完毕 ✓');
