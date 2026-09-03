@@ -5,6 +5,7 @@
 数据保存在 %APPDATA%\\EdgeReader\\articles.json。
 """
 import base64
+import ctypes
 import hashlib
 import json
 import os
@@ -499,11 +500,14 @@ def _read_prefs():
 
 def main():
     if not _acquire_single_instance():
-        import ctypes
         ctypes.windll.user32.MessageBoxW(0, 'Edge 阅读器已经在运行了。', '提示', 0x40)
         return
     api = ReaderApi()
     geom = _read_prefs().get('window') or {}
+    # 屏幕异常（比如曾把最大化的大尺寸误存为窗口几何）时回退默认
+    sw, sh = ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)
+    if geom.get('w', 0) > sw or geom.get('h', 0) > sh:
+        geom = {}
     window = webview.create_window(
         'Edge 阅读器', resource_path(os.path.join('web', 'index.html')), js_api=api,
         width=geom.get('w', 1040), height=geom.get('h', 780),
@@ -515,6 +519,15 @@ def main():
     _window = window
 
     def _save_geometry():
+        if _fs:
+            return  # 全屏中不保存
+        try:
+            # 最大化状态下不保存（否则小窗尺寸会被大尺寸覆盖）
+            native = getattr(window, 'native', None)
+            if native is not None and int(native.WindowState) == 2:  # 2 = Maximized
+                return
+        except Exception:
+            pass
         try:
             db = api._load_db()
             db.setdefault('prefs', {})['window'] = {

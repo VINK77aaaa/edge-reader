@@ -82,6 +82,8 @@
     position: absolute; top: 0; left: 0; height: 2px; width: 0;
     background: var(--accent); z-index: 20; transition: width .1s linear;
   }
+  /* 全屏：隐藏顶部工具栏，纯正文沉浸（Esc / F11 退出） */
+  body.fs #readerToolbar { display: none; }
   #readerToolbar {
     display: flex; align-items: center; gap: 10px; padding: 10px 16px;
     background: var(--card); border-bottom: 1px solid var(--line); flex-shrink: 0; flex-wrap: wrap;
@@ -741,6 +743,7 @@ let fullscreen = false;
 function toggleFullscreen() {
   api().toggle_fullscreen().then(isFs => {
     fullscreen = !!isFs;
+    document.body.classList.toggle('fs', fullscreen);
     $('fsBtn').textContent = fullscreen ? '退出全屏' : '全屏';
   }).catch(() => toast('全屏切换失败'));
 }
