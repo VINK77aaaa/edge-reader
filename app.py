@@ -498,15 +498,39 @@ def _read_prefs():
         return {}
 
 
+def _foreground_existing():
+    """已有一个实例在运行时，把它的窗口拉到前台（解决最小化/被遮挡时“打不开”的错觉）。"""
+    user32 = ctypes.windll.user32
+    found = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    def _cb(hwnd, _lparam):
+        buf = ctypes.create_unicode_buffer(64)
+        user32.GetWindowTextW(hwnd, buf, 64)
+        if 'Edge 阅读器' in buf.value:
+            found.append(hwnd)
+        return True
+
+    user32.EnumWindows(_cb, None)
+    if found:
+        user32.ShowWindow(found[0], 9)  # SW_RESTORE
+        user32.SetForegroundWindow(found[0])
+        return True
+    return False
+
+
 def main():
     if not _acquire_single_instance():
+        if _foreground_existing():
+            return
         ctypes.windll.user32.MessageBoxW(0, 'Edge 阅读器已经在运行了。', '提示', 0x40)
         return
     api = ReaderApi()
     geom = _read_prefs().get('window') or {}
-    # 屏幕异常（比如曾把最大化的大尺寸误存为窗口几何）时回退默认
+    # 屏幕外 / 超屏的坏几何（历史遗留的最小化坐标等）回退默认
     sw, sh = ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)
-    if geom.get('w', 0) > sw or geom.get('h', 0) > sh:
+    if (geom.get('w', 0) > sw or geom.get('h', 0) > sh
+            or geom.get('x', 0) < -20000 or geom.get('y', 0) < -20000):
         geom = {}
     window = webview.create_window(
         'Edge 阅读器', resource_path(os.path.join('web', 'index.html')), js_api=api,
@@ -522,13 +546,15 @@ def main():
         if _fs:
             return  # 全屏中不保存
         try:
-            # 最大化状态下不保存（否则小窗尺寸会被大尺寸覆盖）
+            # 最小化(1)/最大化(2)状态下不保存（否则会把 -32000 这类假坐标存下来）
             native = getattr(window, 'native', None)
-            if native is not None and int(native.WindowState) == 2:  # 2 = Maximized
+            if native is not None and int(native.WindowState) in (1, 2):
                 return
         except Exception:
             pass
         try:
+            if window.x is None or window.y is None or window.x < -20000 or window.y < -20000:
+                return
             db = api._load_db()
             db.setdefault('prefs', {})['window'] = {
                 'x': window.x, 'y': window.y, 'w': window.width, 'h': window.height,
