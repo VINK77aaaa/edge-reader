@@ -17,7 +17,7 @@ import uuid
 
 import webview
 
-APP_VERSION = '1.0.5'
+APP_VERSION = '1.0.6'
 REPO = 'VINK77aaaa/edge-reader'
 
 try:
@@ -67,6 +67,7 @@ _edge_segs = []
 _edge_paths = []
 _edge_gen_done = False
 _edge_error = None
+_edge_want = 0        # 前端当前需要的最大分段号：只合成到这附近，长文不做无谓合成
 _tts_session = 0      # 朗读会话编号：每次 tts_start 递增，旧线程发现过时立即退出
 _window = None  # webview 窗口引用（放模块级，避免被 pywebview 扫描 API 对象）
 _fs = False     # 当前是否处于全屏
@@ -121,10 +122,18 @@ class ReaderApi:
 
     def get_articles(self):
         db = self._load_db()
-        return [
-            {k: a[k] for k in ('id', 'title', 'created', 'progress')}
-            for a in db['articles']
-        ]
+        out = []
+        for a in db['articles']:
+            out.append({
+                'id': a['id'],
+                'title': a.get('title') or '未命名文章',
+                'created': a.get('created') or '',
+                'progress': a.get('progress') or 0.0,
+                'para': a.get('para') or 0,
+                'chars': len((a.get('text') or '').strip()),
+                'read_at': a.get('read_at') or '',
+            })
+        return out
 
     def get_article(self, article_id):
         return self._find(self._load_db(), article_id)
@@ -141,6 +150,7 @@ class ReaderApi:
         if a:
             a['progress'] = float(progress or 0)
             a['para'] = int(para or 0)
+            a['read_at'] = time.strftime('%Y-%m-%d %H:%M')
             self._save_db(db)
         return True
 
@@ -261,11 +271,15 @@ class ReaderApi:
 
     def tts_get_audio(self, index):
         """在线语音模式：前端轮询取已合成好的分段音频。"""
+        global _edge_want
         try:
             i = int(index)
         except (TypeError, ValueError):
             return {'done': True}
         with _edge_lock:
+            # 前端要第 i 段，就把合成窗口推到 i（前端自己只预取当前段之后几段）
+            if i > _edge_want:
+                _edge_want = i
             if i >= len(_edge_paths):
                 if _edge_gen_done:
                     return {'done': True, 'error': _edge_error}
@@ -415,7 +429,7 @@ class ReaderApi:
         voice_name 带 'edge:' 前缀走 Edge 在线神经网络语音（如晓晓、云健），
         否则走本机 SAPI 语音。"""
         global _rate, _voice_name, _tts_thread, _tts_session
-        global _edge_segs, _edge_paths, _edge_gen_done, _edge_error
+        global _edge_segs, _edge_paths, _edge_gen_done, _edge_error, _edge_want
         if voice_name and voice_name.startswith('edge:'):
             try:
                 import edge_tts  # noqa: F401
@@ -438,6 +452,7 @@ class ReaderApi:
                 _edge_paths = [None] * len(segs)
                 _edge_gen_done = False
                 _edge_error = None
+                _edge_want = 0
             _tts_thread = threading.Thread(
                 target=self._edge_gen_loop, args=(segs, voice_name[5:], _rate, sess), daemon=True)
             _tts_thread.start()
@@ -561,6 +576,15 @@ class ReaderApi:
             self._notify({'type': 'state', 'state': 'speaking'})
         try:
             for idx, seg in enumerate(segments):
+                # 窗口化合成：前端只预取当前段之后几段，没必要把整篇几十段全合成完
+                while True:
+                    if _stop_evt.is_set() or sess != _tts_session:
+                        return
+                    with _edge_lock:
+                        reach = _edge_want
+                    if idx <= reach:
+                        break
+                    time.sleep(0.05)
                 if _stop_evt.is_set() or sess != _tts_session:
                     break
                 key = hashlib.md5((voice_id + rate_str + seg['t']).encode('utf-8')).hexdigest()
