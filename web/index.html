@@ -226,10 +226,23 @@
       <p style="font-size:12px; color:var(--sub); margin-top:10px;">提示：也可以把 docx / doc / txt / md 文档直接拖进窗口</p>
     </div>
 
+    <div class="card" id="updateCard" style="display:none">
+      <h2 id="updTitle">发现新版本</h2>
+      <div id="updNotes" style="font-size:12px; color:var(--sub); white-space:pre-wrap; max-height:130px; overflow-y:auto; margin-bottom:10px;"></div>
+      <div class="opt-row">
+        <span id="updStatus" style="font-size:13px; color:var(--sub)"></span>
+        <button class="btn" id="updBtn">下载更新</button>
+      </div>
+    </div>
+
     <div class="card">
       <h2 id="histToggle" title="点击展开 / 收起">历史记录 <span id="histCount"></span><span id="histArrow" class="arrow">▸</span></h2>
       <div id="histList"></div>
     </div>
+
+    <p style="text-align:center; font-size:12px; color:var(--sub);">
+      Edge 阅读器 v1.0.4 · <a href="#" id="checkUpdLink" style="color:var(--accent); text-decoration:none;">检查更新</a>
+    </p>
   </div>
 </div>
 
@@ -805,17 +818,33 @@ window.__ttsEvent = ev => {
       clearHighlight();
     }
     showTtsBar();
+  } else if (ev.type === 'info') {
+    toast(ev.message || '');
+  } else if (ev.type === 'dl_progress') {
+    if (updDownloading) {
+      $('updStatus').textContent = '下载中 ' + ev.pct + '%';
+      $('updBtn').textContent = '下载中 ' + ev.pct + '%';
+    }
+  } else if (ev.type === 'dl_done') {
+    if (updDownloading) {
+      updDownloading = false;
+      $('updStatus').textContent = '下载完成';
+      $('updBtn').textContent = '安装并重启';
+      $('updBtn').disabled = false;
+      $('updBtn').onclick = () => api().apply_update();
+    }
+  } else if (ev.type === 'update_suggest') {
+    // 微软接口鉴权变更（EXE 内置的 edge-tts 过期）：自动检查并展示更新卡片
+    api().check_update().then(r => { if (r && r.update) showUpdateBanner(r); }).catch(() => {});
   }
 };
 
 function pollTTS() {
   if (!window.pywebview || !api().tts_poll) return;
-  // 只有阅读页在朗读/加载时才轮询，避免高频桥接调用拖垮界面线程
-  if (!$('readerView').classList.contains('active')) return;
   api().tts_poll().then(events => {
     (events || []).forEach(window.__ttsEvent);
   }).catch(() => {});
-  if (edge.mode === 'edge' && state.ttsPlaying) refillEdge();
+  if ($('readerView').classList.contains('active') && edge.mode === 'edge' && state.ttsPlaying) refillEdge();
 }
 
 /* ================= 排版工具 ================= */
@@ -985,6 +1014,38 @@ $('readerScroll').addEventListener('scroll', () => {
   clearTimeout(selHideTimer);
   selHideTimer = setTimeout(() => { selBtn.style.display = 'none'; }, 200);
 });
+
+/* ================= 版本 / 自动更新 ================= */
+let updDownloading = false;
+let updUrl = null;
+
+function showUpdateBanner(r) {
+  updUrl = r.url;
+  $('updateCard').style.display = '';
+  $('updTitle').textContent = '发现新版本 v' + r.version + '（当前 v' + r.current + '）';
+  $('updNotes').textContent = (r.notes || '').replace(/^## [^\n]*\n?/, '').trim();
+  $('updStatus').textContent = r.size ? '大小约 ' + (r.size / 1048576).toFixed(1) + ' MB' : '';
+  $('updBtn').textContent = '下载更新';
+  $('updBtn').disabled = false;
+  $('updBtn').onclick = () => {
+    updDownloading = true;
+    $('updBtn').disabled = true;
+    $('updStatus').textContent = '下载中 0%';
+    api().download_update(updUrl);
+  };
+  showView('home');
+}
+
+$('checkUpdLink').onclick = e => {
+  e.preventDefault();
+  $('checkUpdLink').textContent = '检查中…';
+  api().check_update().then(r => {
+    $('checkUpdLink').textContent = '检查更新';
+    if (!r || r.error) { toast((r && r.error) || '检查失败'); return; }
+    if (!r.update) { toast('已是最新版本 v' + r.current); return; }
+    showUpdateBanner(r);
+  }).catch(() => { $('checkUpdLink').textContent = '检查更新'; toast('检查失败'); });
+};
 
 /* ================= 初始化 ================= */
 window.addEventListener('pywebviewready', async () => {

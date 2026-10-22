@@ -9,12 +9,16 @@ import ctypes
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
 import uuid
 
 import webview
+
+APP_VERSION = '1.0.4'
+REPO = 'VINK77aaaa/edge-reader'
 
 try:
     import pythoncom
@@ -291,6 +295,94 @@ class ReaderApi:
             pass
         return _fs
 
+    # ---------------- 自动更新 ----------------
+
+    def check_update(self):
+        """查询 GitHub 最新 Release 并比较版本。"""
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                'https://api.github.com/repos/%s/releases/latest' % REPO,
+                headers={'User-Agent': 'EdgeReader', 'Accept': 'application/vnd.github+json'})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                data = json.loads(r.read().decode('utf-8'))
+        except Exception as exc:
+            return {'error': '检查更新失败（请检查网络）: %s' % exc}
+        tag = (data.get('tag_name') or '').lstrip('v')
+        try:
+            latest = tuple(int(x) for x in tag.split('.'))
+        except ValueError:
+            return {'error': '无法解析版本号: %s' % tag}
+        current = tuple(int(x) for x in APP_VERSION.split('.'))
+        if latest <= current:
+            return {'update': False, 'current': APP_VERSION}
+        assets = data.get('assets', [])
+        url = next((a['browser_download_url'] for a in assets if a['name'] == 'EdgeReader.exe'), None)
+        size = next((a.get('size', 0) for a in assets if a['name'] == 'EdgeReader.exe'), 0)
+        if not url:
+            return {'error': '新版本 %s 缺少 EXE 附件' % tag}
+        return {'update': True, 'current': APP_VERSION, 'version': tag,
+                'notes': (data.get('body') or '')[:600], 'url': url, 'size': size}
+
+    def download_update(self, url):
+        """后台下载新 EXE 到 <自身>.new，进度通过轮询事件推送。"""
+        if not getattr(sys, 'frozen', False):
+            return {'error': '源码运行模式请用 git pull 更新'}
+        target = sys.executable + '.new'
+
+        def work():
+            import urllib.request
+            try:
+                req = urllib.request.Request(url, headers={'User-Agent': 'EdgeReader'})
+                with urllib.request.urlopen(req, timeout=30) as r, open(target, 'wb') as f:
+                    total = int(r.headers.get('Content-Length', 0)) or 1
+                    got = 0
+                    while True:
+                        chunk = r.read(65536)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        got += len(chunk)
+                        self._notify({'type': 'dl_progress', 'pct': min(99, got * 100 // total)})
+                if os.path.getsize(target) < 1024 * 1024:
+                    raise RuntimeError('下载的文件不完整')
+                self._notify({'type': 'dl_done'})
+            except Exception as exc:
+                try:
+                    os.remove(target)
+                except OSError:
+                    pass
+                self._notify({'type': 'error', 'message': '下载失败: %s' % exc})
+
+        threading.Thread(target=work, daemon=True).start()
+        return True
+
+    def apply_update(self):
+        """替换自身并重启新版本。"""
+        if not getattr(sys, 'frozen', False):
+            return {'error': '源码运行模式请用 git pull 更新'}
+        exe = sys.executable
+        new, old = exe + '.new', exe + '.old'
+        if not os.path.exists(new):
+            return {'error': '尚未下载新版本'}
+        try:
+            if os.path.exists(old):
+                os.remove(old)
+            os.rename(exe, old)
+            os.rename(new, exe)
+        except Exception as exc:
+            return {'error': '替换文件失败: %s' % exc}
+        subprocess.Popen([exe, '--updated'], cwd=os.path.dirname(exe),
+                         creationflags=0x00000008 | 0x200)  # DETACHED | NEW_PROCESS_GROUP
+        time.sleep(0.4)
+        if _window:
+            try:
+                _window.destroy()
+            except Exception:
+                pass
+        os._exit(0)
+        return {'ok': True}
+
     def set_title(self, title):
         """窗口标题跟随文章标题。"""
         global _window
@@ -393,20 +485,53 @@ class ReaderApi:
         except Exception:
             pass
 
+    @staticmethod
+    def _synth_once(edge_tts_mod, text, path, voice_id, rate_str):
+        import asyncio
+        com = edge_tts_mod.Communicate(text, voice_id, rate=rate_str)
+        asyncio.run(asyncio.wait_for(com.save(path), timeout=90))
+
+    def _upgrade_edge_tts(self):
+        """源码运行：pip 升级 edge-tts（微软改鉴权导致 403 时的自动自救）。"""
+        if getattr(sys, 'frozen', False):
+            return False
+        try:
+            r = subprocess.run(
+                [sys.executable, '-m', 'pip', 'install', '-U', 'edge-tts',
+                 '-i', 'https://pypi.tuna.tsinghua.edu.cn/simple'],
+                capture_output=True, timeout=300)
+            return r.returncode == 0
+        except Exception:
+            return False
+
+    def _synth_heal(self, text, path, voice_id, rate_str):
+        """合成一段；若遇 403 鉴权拒绝：源码模式自动升级 edge-tts 后重试，EXE 模式抛出并提示更新程序。"""
+        import importlib
+        try:
+            import edge_tts
+            self._synth_once(edge_tts, text, path, voice_id, rate_str)
+            return
+        except Exception as exc:
+            first = exc
+        msg = str(first)
+        if '403' not in msg and 'Invalid response status' not in msg:
+            raise first
+        # 403：微软鉴权变更，尝试自动升级 edge-tts
+        if self._upgrade_edge_tts():
+            self._notify({'type': 'info', 'message': '检测到微软接口变更，已自动升级 edge-tts，正在重试…'})
+            import edge_tts as fresh
+            importlib.reload(fresh)
+            self._synth_once(fresh, text, path, voice_id, rate_str)
+            return
+        raise RuntimeError('微软在线语音接口鉴权已变更（403），请更新程序后重试')
+
     def _edge_gen_loop(self, segments, voice_id, rate, sess):
         """Edge 在线语音模式：后台逐段合成 mp3（带缓存），前端轮询 tts_get_audio 取走播放。"""
         global _edge_gen_done, _edge_error
-        import asyncio
-
-        import edge_tts
 
         os.makedirs(TTS_CACHE_DIR, exist_ok=True)
         pct = rate * 10
         rate_str = ('+%d%%' % pct) if pct >= 0 else ('%d%%' % pct)
-
-        async def synth(text, path):
-            com = edge_tts.Communicate(text, voice_id, rate=rate_str)
-            await asyncio.wait_for(com.save(path), timeout=90)
 
         if sess == _tts_session:
             self._notify({'type': 'state', 'state': 'speaking'})
@@ -417,7 +542,7 @@ class ReaderApi:
                 key = hashlib.md5((voice_id + rate_str + seg['t']).encode('utf-8')).hexdigest()
                 path = os.path.join(TTS_CACHE_DIR, key + '.mp3')
                 if not os.path.exists(path):
-                    asyncio.run(synth(seg['t'], path))
+                    self._synth_heal(seg['t'], path, voice_id, rate_str)
                 if _stop_evt.is_set() or sess != _tts_session:
                     break
                 with _edge_lock:
@@ -430,9 +555,11 @@ class ReaderApi:
                 return
             with _edge_lock:
                 _edge_gen_done = True
-                _edge_error = '在线语音合成失败（请检查网络）: %s' % exc
+                _edge_error = '在线语音合成失败: %s' % exc
             self._notify({'type': 'error',
-                          'message': '在线语音合成失败（请检查网络）: %s' % exc})
+                          'message': '在线语音合成失败: %s' % exc})
+            if '鉴权' in str(exc):
+                self._notify({'type': 'update_suggest'})
         finally:
             with _edge_lock:
                 if sess == _tts_session:
@@ -484,10 +611,17 @@ def resource_path(rel):
 
 
 def _acquire_single_instance():
-    """用 Windows 互斥量保证同一时间只有一个实例运行。"""
-    import ctypes
-    ctypes.windll.kernel32.CreateMutexW(None, False, 'EdgeReader_SingleInstance_Mutex')
-    return ctypes.windll.kernel32.GetLastError() != 183  # 183 = ERROR_ALREADY_EXISTS
+    """用 Windows 互斥量保证同一时间只有一个实例运行。
+
+    自动更新重启时带 --updated 参数：旧进程退出互斥量需要一点时间，此时最多等 10 秒。"""
+    wait_until = time.time() + 10 if '--updated' in sys.argv else 0
+    while True:
+        ctypes.windll.kernel32.CreateMutexW(None, False, 'EdgeReader_SingleInstance_Mutex')
+        if ctypes.windll.kernel32.GetLastError() != 183:  # 183 = ERROR_ALREADY_EXISTS
+            return True
+        if time.time() >= wait_until:
+            return False
+        time.sleep(0.3)
 
 
 def _read_prefs():
@@ -541,6 +675,12 @@ def main():
     )
     global _window
     _window = window
+    try:
+        old = sys.executable + '.old'
+        if getattr(sys, 'frozen', False) and os.path.exists(old):
+            os.remove(old)
+    except Exception:
+        pass
 
     def _save_geometry():
         if _fs:
