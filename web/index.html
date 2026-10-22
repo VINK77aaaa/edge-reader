@@ -241,7 +241,7 @@
     </div>
 
     <p style="text-align:center; font-size:12px; color:var(--sub);">
-      Edge 阅读器 v1.0.4 · <a href="#" id="checkUpdLink" style="color:var(--accent); text-decoration:none;">检查更新</a>
+      Edge 阅读器 v1.0.5 · <a href="#" id="checkUpdLink" style="color:var(--accent); text-decoration:none;">检查更新</a>
     </p>
   </div>
 </div>
@@ -310,6 +310,8 @@ function toast(msg) {
 const END_PUNCT = /[。！？；…”"’']*[。！？；!?;…]"?$/;
 const LIST_START = /^\s*([0-9]{1,3}[、.．]\s*|[一二三四五六七八九十百]{1,4}[、.]\s*|[(（][0-9一二三四五][)）]|[•●○▪◆*–—-]\s+|#{1,6}\s|第[0-9一二三四五六七八九十百千]{1,5}[章节回讲幕]|【.+】)$/;
 const END_ANY = /[。！？!?；;…”"）)】\.\!\?;:]$/;
+// 可朗读文字：纯标点/分隔线（---、***、###）送进 edge-tts 会返回“No audio was received”
+const SPEAKABLE = /[\p{L}\p{N}]/u;
 
 function organizeText(raw) {
   const lines = raw.replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').split('\n');
@@ -563,13 +565,15 @@ const edge = { audioQ: {}, playIdx: 0, fillIdx: 0, genDone: false, audio: null, 
                fetching: false, mode: 'sapi', segList: [] };
 
 function startTTS(fromPara) {
-  const segs = state.segs.filter(s => s.p >= fromPara);
-  if (!segs.length) return;
+  // 纯符号段落（---、***、###等）没有可合成的声音，过滤掉，否则整篇朗读会卡在它上面
+  const segs = state.segs.filter(s => s.p >= fromPara && SPEAKABLE.test(s.t));
+  if (!segs.length) { toast('这里没有可朗读的文字'); return; }
   segs.forEach((s, i) => { s.idx = i; });
   clearHighlight();
   stopAudio();
   edge.audioQ = {}; edge.playIdx = 0; edge.fillIdx = 0; edge.genDone = false;
   edge.waiting = false; edge.fetching = false; edge.segList = segs;
+  edge.failed = false; edge.emptyMsg = '';
   const voice = $('voiceSel').value || 'edge:zh-CN-XiaoxiaoNeural';
   edge.mode = voice.startsWith('edge:') ? 'edge' : 'sapi';
   api().tts_start(segs.map(s => ({ p: s.p, t: s.t })), voice, +$('rateSlider').value).then(() => {
@@ -600,11 +604,19 @@ function highlightSeg(seg) {
 }
 
 function finishEdge() {
+  const played = edge.playIdx > 0;
   state.ttsPlaying = false; state.ttsPaused = false;
   $('playBtn').textContent = '▶';
-  $('readProgress').style.width = '100%';
   clearHighlight();
   showTtsBar();
+  if (edge.failed) { edge.failed = false; return; }  // 具体错误已提示过，别再覆盖成“朗读完毕”
+  if (!played) {
+    // 一段音频都没拿到：如实报错，避免出现“点了播放却没反应/直接说读完了”
+    toast(edge.emptyMsg || '没有可播放的语音，请再点一次播放');
+    edge.emptyMsg = '';
+    return;
+  }
+  $('readProgress').style.width = '100%';
   toast('朗读完毕 ✓');
 }
 
@@ -646,7 +658,18 @@ function tryPlayNext() {
     edge.playIdx++;
     refillEdge().then(tryPlayNext);
   };
-  a.play().catch(e => { edge.audio = null; toast('音频播放失败: ' + e.message); });
+  const p = a.play();
+  if (p && p.catch) p.catch(e => {
+    // 播放失败（如 WebView2 拒绝自动播放）：复位成“未播放”，用户再点一次即可重新开始
+    edge.audio = null;
+    edge.failed = true;
+    edge.genDone = true;
+    state.ttsPlaying = false; state.ttsPaused = false;
+    $('playBtn').textContent = '▶';
+    clearHighlight();
+    showTtsBar();
+    toast('音频播放失败，请再点一次播放：' + ((e && e.message) || e));
+  });
 }
 
 /* 从 Python 拉取已合成好的分段音频，直到取空或全部合成完 */
@@ -664,7 +687,7 @@ async function refillEdge() {
       }
       if (r && r.done) {
         edge.genDone = true;
-        if (r.error) toast(r.error);
+        if (r.error) { edge.failed = true; edge.emptyMsg = r.error; toast(r.error); }
         break;
       }
       break; // 当前段还没合成好，靠下次轮询再来
@@ -728,6 +751,7 @@ $('stopBtn').onclick = () => {
   stopAudio();
   edge.audioQ = {}; edge.playIdx = 0; edge.fillIdx = 0;
   edge.genDone = false; edge.waiting = false; edge.fetching = false;
+  edge.failed = false; edge.emptyMsg = '';
   state.ttsPlaying = false;
   state.ttsPaused = false;
   $('playBtn').textContent = '▶';

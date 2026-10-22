@@ -17,7 +17,7 @@ import uuid
 
 import webview
 
-APP_VERSION = '1.0.4'
+APP_VERSION = '1.0.5'
 REPO = 'VINK77aaaa/edge-reader'
 
 try:
@@ -37,6 +37,8 @@ SPF_ASYNC = 1
 SPF_PURGEBEFORESPEAK = 2
 # ISpVoice Status.RunningState 实测取值：0=未开始/已暂停，2=朗读中，1=完成
 SPRS_DONE = 1
+# 在线语音缓存文件小于此字节数即视为“空/损坏”（合成中断会留下 0 字节 mp3）
+MIN_AUDIO_BYTES = 1024
 
 
 def clamp_rate(rate):
@@ -270,11 +272,12 @@ class ReaderApi:
                 return {}
             path = _edge_paths[i]
             seg = _edge_segs[i] if i < len(_edge_segs) else None
-        if path is None or not os.path.exists(path):
+        if path is None or not self._cache_ok(path):
             # 段落尚未合成；若合成已整体结束仍未产出，视为提前终止
             with _edge_lock:
                 if _edge_gen_done:
-                    return {'done': True, 'error': _edge_error}
+                    return {'done': True,
+                            'error': _edge_error or '语音缓存不可用，请重新播放'}
             return {}
         try:
             with open(path, 'rb') as f:
@@ -487,9 +490,30 @@ class ReaderApi:
 
     @staticmethod
     def _synth_once(edge_tts_mod, text, path, voice_id, rate_str):
+        """先写临时文件，合成完整且非空后再原子改名，避免中断留下半截/0 字节缓存。"""
         import asyncio
+        tmp = path + '.part'
         com = edge_tts_mod.Communicate(text, voice_id, rate=rate_str)
-        asyncio.run(asyncio.wait_for(com.save(path), timeout=90))
+        try:
+            asyncio.run(asyncio.wait_for(com.save(tmp), timeout=90))
+            size = os.path.getsize(tmp)
+            if size < MIN_AUDIO_BYTES:
+                raise RuntimeError('合成结果为空（%d 字节）' % size)
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+    @staticmethod
+    def _cache_ok(path):
+        """缓存是否可用：0 字节或过小的 mp3 都是合成中断留下的坏文件。"""
+        try:
+            return os.path.getsize(path) >= MIN_AUDIO_BYTES
+        except OSError:
+            return False
 
     def _upgrade_edge_tts(self):
         """源码运行：pip 升级 edge-tts（微软改鉴权导致 403 时的自动自救）。"""
@@ -541,7 +565,12 @@ class ReaderApi:
                     break
                 key = hashlib.md5((voice_id + rate_str + seg['t']).encode('utf-8')).hexdigest()
                 path = os.path.join(TTS_CACHE_DIR, key + '.mp3')
-                if not os.path.exists(path):
+                if not self._cache_ok(path):
+                    # 坏缓存（多为上次合成中断留下的 0 字节文件）先删掉，避免永远播不出声
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
                     self._synth_heal(seg['t'], path, voice_id, rate_str)
                 if _stop_evt.is_set() or sess != _tts_session:
                     break
@@ -624,6 +653,24 @@ def _acquire_single_instance():
         time.sleep(0.3)
 
 
+def _clean_tts_cache():
+    """清掉历史遗留的坏缓存（0 字节/过小/残留的 .part），它们会让朗读“点了没反应”。"""
+    removed = 0
+    try:
+        names = os.listdir(TTS_CACHE_DIR)
+    except OSError:
+        return 0
+    for name in names:
+        path = os.path.join(TTS_CACHE_DIR, name)
+        try:
+            if name.endswith('.part') or (name.endswith('.mp3') and not ReaderApi._cache_ok(path)):
+                os.remove(path)
+                removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 def _read_prefs():
     try:
         with open(DB_PATH, 'r', encoding='utf-8') as f:
@@ -660,6 +707,7 @@ def main():
         ctypes.windll.user32.MessageBoxW(0, 'Edge 阅读器已经在运行了。', '提示', 0x40)
         return
     api = ReaderApi()
+    _clean_tts_cache()  # 清理历史坏缓存，避免“点播放没声音/直接说读完”
     geom = _read_prefs().get('window') or {}
     # 屏幕外 / 超屏的坏几何（历史遗留的最小化坐标等）回退默认
     sw, sh = ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)
